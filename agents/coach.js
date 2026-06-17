@@ -66,7 +66,7 @@ class PedagogicalCoach {
     const allWeaknesses = evaluations.flatMap(ev => ev.weaknesses || []);
     const weaknessFrequency = {};
     allWeaknesses.forEach(w => {
-      weaknessFrequency[w] = (weaknessnessFrequency[w] || 0) + 1;
+      weaknessFrequency[w] = (weaknessFrequency[w] || 0) + 1;
     });
 
     const topWeaknesses = Object.entries(weaknessFrequency)
