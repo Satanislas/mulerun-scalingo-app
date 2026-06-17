@@ -5,58 +5,61 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Configuration du client Redis
-const redisUrl = process.env.SCALINGO_REDIS_URL || 'redis://localhost:6379';
-const redisClient = createClient({ url: redisUrl });
-
-redisClient.on('error', (err) => console.error('Erreur client Redis', err));
-
-// Connexion à Redis
-(async () => {
-  try {
-    await redisClient.connect();
-    console.log('Connecté à Redis avec succès');
-  } catch (err) {
-    console.error('Échec de la connexion à Redis:', err);
+// In-memory fallback for when Redis is unavailable
+class MemoryStore {
+  constructor() { this.store = new Map(); this.timers = new Map(); }
+  async connect() { console.log('Using in-memory store (Redis unavailable)'); }
+  async get(key) { return this.store.get(key) || null; }
+  async setEx(key, ttl, value) {
+    this.store.set(key, value);
+    if (this.timers.has(key)) clearTimeout(this.timers.get(key));
+    this.timers.set(key, setTimeout(() => { this.store.delete(key); this.timers.delete(key); }, ttl * 1000));
   }
-})();
+}
 
-// Servir les fichiers statiques
+// Redis client setup
+const redisUrl = process.env.SCALINGO_REDIS_URL;
+let redisClient;
+
+if (redisUrl) {
+  redisClient = createClient({ url: redisUrl });
+  redisClient.on('error', (err) => console.error('Redis client error:', err.message));
+  redisClient.on('connect', () => console.log('Connected to Redis'));
+} else {
+  redisClient = new MemoryStore();
+}
+
+// Make redisClient available to routes
+app.locals.redisClient = redisClient;
+
+// Middleware
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Mécanisme de cache avec TTL de 10 secondes
-const CACHE_TTL = 10;
+// Routes
+app.use('/api/plan', require('./routes/plan'));
+app.use('/api/exercise', require('./routes/exercise'));
+app.use('/api/evaluate', require('./routes/evaluate'));
+app.use('/api/coach', require('./routes/coach'));
+app.use('/api/session', require('./routes/session'));
 
-app.get('/api/data', async (req, res) => {
-  const cacheKey = 'app_data_cache';
-  
-  try {
-    // Essayer de récupérer les données du cache
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      return res.json({ source: 'cache', data: JSON.parse(cachedData) });
-    }
-
-    // Simuler la récupération de données fraîches (ex: depuis une BDD ou API externe)
-    const freshData = { 
-      message: 'Bonjour depuis Scalingo !', 
-      timestamp: new Date().toISOString() 
-    };
-    
-    // Stocker dans le cache avec un TTL de 10 secondes
-    await redisClient.setEx(cacheKey, CACHE_TTL, JSON.stringify(freshData));
-    
-    res.json({ source: 'fresh', data: freshData });
-  } catch (error) {
-    console.error('Erreur lors de la gestion du cache:', error);
-    res.status(500).json({ error: 'Erreur interne du serveur' });
-  }
-});
-
-app.get('/', (req, res) => {
+// SPA fallback
+app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.listen(port, () => {
-  console.log(`Le serveur est en cours d'exécution sur le port ${port}`);
-});
+// Start server
+(async () => {
+  try {
+    await redisClient.connect();
+    console.log('Data store connected successfully');
+  } catch (err) {
+    console.error('Failed to connect to data store:', err.message);
+    console.log('Falling back to in-memory store');
+    app.locals.redisClient = new MemoryStore();
+  }
+  
+  app.listen(port, () => {
+    console.log(`Epistudy server running on port ${port}`);
+  });
+})();
