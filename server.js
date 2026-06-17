@@ -44,6 +44,7 @@ app.use('/api/evaluate', require('./routes/evaluate'));
 app.use('/api/coach', require('./routes/coach'));
 app.use('/api/session', require('./routes/session'));
 app.use('/api/subjects', require('./routes/subjects'));
+app.use('/api/lesson', require('./routes/lesson'));
 
 // SPA fallback
 app.get('*', (req, res) => {

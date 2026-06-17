@@ -68,6 +68,7 @@
       coach: (sessionId) => fetch('/api/coach', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId}) }).then(j),
       getSession: (sessionId) => fetch('/api/session/' + sessionId).then(j),
       getHistory: (sessionId) => fetch('/api/session/' + sessionId + '/history').then(j),
+      lessonChat: (payload) => fetch('/api/lesson/chat', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) }).then(j),
     };
 
     // ── Context ─────────────────────────────────────────────────────────────
@@ -498,6 +499,7 @@
       const [coachResult, setCoachResult] = useState(null);
       const [history, setHistory] = useState(null);
       const [busy, setBusy] = useState(false);
+      const [activeLesson, setActiveLesson] = useState(null);
 
       const tab = state.workspaceTab || 'overview';
       const setTab = (id) => setState((s) => ({ ...s, workspaceTab: id }));
@@ -570,6 +572,10 @@
         generateExercise();
       };
 
+      const openLesson = (course, courseId) => {
+        setActiveLesson({ course, courseId });
+      };
+
       if (loading || !subject) {
         return <div className="max-w-4xl mx-auto"><Skeleton lines={8}/></div>;
       }
@@ -623,11 +629,12 @@
           </div>
 
           {tab === 'overview' && <OverviewTab subject={subject} session={session} analytics={analytics} onAct={generateExercise} onAskCoach={askCoach} coachResult={coachResult}/>}
-          {tab === 'courses' && <CoursesTab subject={subject} session={session}/>}
+          {tab === 'courses' && <CoursesTab subject={subject} session={session} onOpenLesson={openLesson}/>}
           {tab === 'exercises' && <ExercisesTab subject={subject} session={session} exercise={exercise} answer={answer} setAnswer={setAnswer} onGenerate={generateExercise} onSubmit={submitAnswer} busy={busy} lastEvaluation={lastEvaluation}/>}
           {tab === 'evaluation' && <EvaluationTab subject={subject} evaluation={lastEvaluation} coachResult={coachResult} onAskCoach={askCoach} busy={busy} onNext={generateExercise}/>}
           {tab === 'skills' && <SkillsTab subject={subject}/>}
           {tab === 'history' && <HistoryTab subject={subject} session={session} history={history} analytics={analytics}/>}
+          {activeLesson && <LessonModal subject={subject} session={session} course={activeLesson.course} courseId={activeLesson.courseId} onClose={()=>setActiveLesson(null)}/>}
         </div>
       );
     }
@@ -718,7 +725,7 @@
       );
     }
 
-    function CoursesTab({ subject, session }) {
+    function CoursesTab({ subject, session, onOpenLesson }) {
       const plan = session?.plan;
       const p = subject.palette;
       if (!plan) return <div className="glass-themed rounded-2xl p-6 text-surface-200">Roadmap is being prepared…</div>;
@@ -728,7 +735,14 @@
             const completed = session.completedChapters?.includes(i);
             const current = i === (session.currentChapterIndex || 0);
             return (
-              <div key={i} className={`glass-themed rounded-2xl p-5 transition-all ${current?'glow':''}`}>
+              <div
+                key={i}
+                role="button"
+                tabIndex={0}
+                onClick={()=>onOpenLesson(ch, ch.id ?? i)}
+                onKeyDown={(e)=>{ if (e.key === 'Enter' || e.key === ' ') onOpenLesson(ch, ch.id ?? i); }}
+                className={`group glass-themed rounded-2xl p-5 transition-all cursor-pointer hover:-translate-y-0.5 hover:border-white/20 hover:shadow-2xl ${current?'glow':''}`}
+              >
                 <div className="flex items-start gap-4">
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm" style={{ background: completed?'rgba(34,197,94,0.15)':current?p.bg:'rgba(30,41,59,0.6)', color: completed?'#86efac':current?p.text:'#cbd5e1', border:`1px solid ${completed?'rgba(34,197,94,0.3)':current?p.border:'rgba(51,65,85,0.6)'}` }}>
                     {completed ? UI.check : i + 1}
@@ -744,10 +758,265 @@
                       {ch.objectives.map((o, j) => <span key={j} className="text-[11px] px-2 py-0.5 rounded-full bg-surface-800 text-surface-200">{o}</span>)}
                     </div>
                     <div className="mt-2 text-[11px] text-surface-200/70">~{ch.estimatedTime} min · {ch.content?.context}</div>
+                    <div className="mt-4 inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold transition-all group-hover:translate-x-1" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>
+                      Open AI lesson {UI.arrow}
+                    </div>
                   </div>
                 </div>
               </div>
             );
+          })}
+        </div>
+      );
+    }
+
+    function LessonModal({ subject, session, course, courseId, onClose }) {
+      const p = subject.palette;
+      const [messages, setMessages] = useState([]);
+      const [lessonState, setLessonState] = useState(null);
+      const [input, setInput] = useState('');
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const scrollRef = useRef(null);
+      const storageKey = `epistudy:lesson:${subject.id}:${courseId}`;
+
+      const outline = useMemo(() => {
+        const objectives = course.objectives || [];
+        return [
+          { title: 'Big picture and learning target', type: 'overview' },
+          ...objectives.map((o) => ({ title: o, type: 'objective' })),
+          { title: 'Guided example', type: 'example' },
+          { title: 'Mastery check and next bridge', type: 'mastery' }
+        ];
+      }, [course]);
+
+      const keyConcepts = course.content?.keyConcepts || [];
+      const completed = lessonState?.completedSections || [];
+      const progress = outline.length ? Math.round((completed.length / outline.length) * 100) : 0;
+
+      const persist = (nextMessages, nextState) => {
+        try {
+          localStorage.setItem(storageKey + ':messages', JSON.stringify(nextMessages));
+          localStorage.setItem(storageKey + ':state', JSON.stringify(nextState));
+        } catch (_) {}
+      };
+
+      const callTutor = async ({ text, baseMessages, stateOverride }) => {
+        setLoading(true);
+        setError('');
+        try {
+          const res = await api.lessonChat({
+            subjectId: subject.id,
+            courseId,
+            message: text,
+            lessonState: stateOverride !== undefined ? stateOverride : lessonState
+          });
+          if (res.error) throw new Error(res.error);
+          const assistantMessage = {
+            role: 'assistant',
+            text: res.response,
+            mode: res.mode,
+            at: new Date().toISOString()
+          };
+          const nextMessages = [...baseMessages, assistantMessage];
+          setMessages(nextMessages);
+          setLessonState(res.updatedLessonState);
+          persist(nextMessages, res.updatedLessonState);
+        } catch (e) {
+          setError(e.message || 'Lesson tutor failed');
+        }
+        setLoading(false);
+      };
+
+      useEffect(() => {
+        let savedMessages = [];
+        let savedState = null;
+        try {
+          savedMessages = JSON.parse(localStorage.getItem(storageKey + ':messages') || '[]');
+          savedState = JSON.parse(localStorage.getItem(storageKey + ':state') || 'null');
+        } catch (_) {}
+        if (savedMessages.length) {
+          setMessages(savedMessages);
+          setLessonState(savedState);
+        } else {
+          setLessonState(savedState);
+          callTutor({ text: '', baseMessages: [], stateOverride: savedState });
+        }
+      }, [storageKey]);
+
+      useEffect(() => {
+        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }, [messages, loading]);
+
+      const send = async () => {
+        const text = input.trim();
+        if (!text || loading) return;
+        const userMessage = { role: 'user', text, at: new Date().toISOString() };
+        const baseMessages = [...messages, userMessage];
+        setMessages(baseMessages);
+        setInput('');
+        await callTutor({ text, baseMessages });
+      };
+
+      const resetLesson = async () => {
+        if (!confirm('Restart this lesson from the beginning?')) return;
+        try {
+          localStorage.removeItem(storageKey + ':messages');
+          localStorage.removeItem(storageKey + ':state');
+        } catch (_) {}
+        const freshState = {
+          courseId: String(courseId),
+          currentSection: 0,
+          completedSections: [],
+          userConfusions: [],
+          lastMode: 'teaching',
+          summaryOfWhatUserUnderstood: ''
+        };
+        setMessages([]);
+        setLessonState(freshState);
+        await callTutor({ text: '', baseMessages: [], stateOverride: freshState });
+      };
+
+      return (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md p-2 md:p-5 animate-fadeIn">
+          <div className="h-full max-w-7xl mx-auto rounded-3xl overflow-hidden border border-surface-700 bg-surface-950 shadow-2xl" style={themeStyle(subject)}>
+            <div className="h-full grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)_280px]">
+              {/* Left outline */}
+              <aside className="hidden lg:flex flex-col border-r border-surface-700/70 bg-surface-900/70">
+                <div className="p-5 border-b border-surface-700/70">
+                  <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: p.text }}>Interactive lesson</div>
+                  <h2 className="font-bold leading-tight">{course.title}</h2>
+                  <div className="mt-4">
+                    <div className="flex justify-between text-xs mb-1.5">
+                      <span className="text-surface-200">Lesson progress</span>
+                      <span style={{color: p.text}}>{progress}%</span>
+                    </div>
+                    <ProgressBar value={progress} color={p.gradient}/>
+                  </div>
+                </div>
+                <div className="p-4 space-y-2 overflow-y-auto">
+                  {outline.map((item, i) => {
+                    const done = completed.includes(i);
+                    const active = i === lessonState?.currentSection && !done;
+                    return (
+                      <div key={i} className="flex gap-3 p-3 rounded-xl border" style={{ background: active ? p.bg : 'rgba(15,23,42,0.35)', borderColor: active ? p.border : 'rgba(51,65,85,0.55)' }}>
+                        <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 text-xs font-bold" style={{ background: done ? 'rgba(34,197,94,0.15)' : active ? p.bg : 'rgba(30,41,59,0.7)', color: done ? '#86efac' : active ? p.text : '#94a3b8' }}>
+                          {done ? UI.check : i + 1}
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold leading-snug">{item.title}</div>
+                          <div className="text-[10px] text-surface-200/60 capitalize mt-0.5">{done ? 'covered' : active ? 'teaching now' : item.type}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </aside>
+
+              {/* Center chat */}
+              <main className="min-h-0 flex flex-col bg-gradient-to-b from-surface-950 to-surface-900">
+                <header className="px-4 md:px-6 py-4 border-b border-surface-700/70 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: p.gradient }}>
+                    {UI.brain}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">AI Tutor · {course.title}</div>
+                    <div className="text-xs text-surface-200">Ask anytime — the tutor answers, remembers, and resumes the lesson.</div>
+                  </div>
+                  <button onClick={resetLesson} className="ml-auto hidden md:inline-flex px-3 py-2 rounded-xl bg-surface-800 hover:bg-surface-700 text-xs text-surface-200">Restart</button>
+                  <button onClick={onClose} className="p-2 rounded-xl bg-surface-800 hover:bg-surface-700 text-surface-200">{UI.close}</button>
+                </header>
+
+                <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto px-4 md:px-6 py-5 space-y-4">
+                  {messages.map((m, i) => (
+                    <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`${m.role === 'user' ? 'max-w-[82%] md:max-w-[70%]' : 'max-w-[94%]'} rounded-2xl border px-4 py-3 ${m.role === 'user' ? 'bg-brand-600/20 border-brand-500/30' : 'bg-surface-900/80 border-surface-700'}`}>
+                        {m.role === 'assistant' && (
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="w-2 h-2 rounded-full" style={{ background: p.primary }}/>
+                            <span className="text-[10px] uppercase tracking-wider" style={{ color: p.text }}>Lesson Tutor · {m.mode || 'teaching'}</span>
+                          </div>
+                        )}
+                        <TutorText text={m.text}/>
+                      </div>
+                    </div>
+                  ))}
+                  {loading && (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl border border-surface-700 bg-surface-900/80 px-4 py-3 text-sm text-surface-200 flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"/>
+                        Tutor is deciding whether to teach, answer, or resume…
+                      </div>
+                    </div>
+                  )}
+                  {error && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">{error}</div>}
+                </div>
+
+                <div className="p-4 border-t border-surface-700/70 bg-surface-950/80">
+                  <div className="flex gap-2">
+                    <textarea
+                      value={input}
+                      onChange={(e)=>setInput(e.target.value)}
+                      onKeyDown={(e)=>{ if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      rows={1}
+                      placeholder="Interrupt with a question, ask for an example, or type “continue”…"
+                      className="flex-1 resize-none px-4 py-3 rounded-2xl bg-surface-900 border border-surface-700 text-white placeholder-surface-200/50 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 text-sm"
+                    />
+                    <button onClick={send} disabled={loading || !input.trim()} className="px-5 rounded-2xl text-sm font-semibold text-white disabled:opacity-40" style={{ background: p.gradient }}>
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </main>
+
+              {/* Right learning memory */}
+              <aside className="hidden lg:flex flex-col border-l border-surface-700/70 bg-surface-900/60">
+                <div className="p-5 border-b border-surface-700/70">
+                  <h3 className="font-semibold mb-1">Tutor memory</h3>
+                  <p className="text-xs text-surface-200">State preserved for continuity.</p>
+                </div>
+                <div className="p-5 space-y-4 overflow-y-auto">
+                  <div className="rounded-2xl p-4 bg-surface-800/50 border border-surface-700/60">
+                    <div className="text-xs uppercase tracking-wider mb-2" style={{ color: p.text }}>Current state</div>
+                    <div className="text-sm text-surface-200 leading-relaxed">{lessonState?.summaryOfWhatUserUnderstood || 'Starting lesson…'}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider mb-2" style={{ color: p.text }}>Key concepts</div>
+                    <div className="space-y-2">
+                      {keyConcepts.length ? keyConcepts.map((c, i) => (
+                        <div key={i} className="p-3 rounded-xl bg-surface-800/40 border border-surface-700/50">
+                          <div className="text-sm font-semibold">{c.name}</div>
+                          <div className="text-xs text-surface-200/80 mt-1">{c.description}</div>
+                        </div>
+                      )) : <div className="text-sm text-surface-200">Concept highlights will appear as the plan evolves.</div>}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-wider mb-2" style={{ color: p.text }}>Questions addressed</div>
+                    <div className="space-y-2">
+                      {(lessonState?.userConfusions || []).length ? lessonState.userConfusions.slice().reverse().map((c, i) => (
+                        <div key={i} className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/10 text-xs text-amber-100">“{c.question}”</div>
+                      )) : <div className="text-sm text-surface-200">No interruptions yet.</div>}
+                    </div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function TutorText({ text }) {
+      const lines = String(text || '').split('\n');
+      return (
+        <div className="text-sm leading-relaxed text-surface-100 space-y-1">
+          {lines.map((line, i) => {
+            if (!line.trim()) return <div key={i} className="h-2"/>;
+            if (line.trim() === '---') return <hr key={i} className="border-surface-700 my-3"/>;
+            if (line.startsWith('###')) return <h4 key={i} className="font-semibold text-white pt-2">{line.replace(/^###\s*/, '')}</h4>;
+            if (/^\d+\.\s/.test(line) || line.trim().startsWith('- ')) return <div key={i} className="pl-3 text-surface-200">{line}</div>;
+            return <p key={i}>{line}</p>;
           })}
         </div>
       );
@@ -1088,4 +1357,3 @@
   </script>
 </body>
 </html>
-
