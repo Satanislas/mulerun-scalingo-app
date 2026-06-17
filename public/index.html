@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MuleRun Scalingo App</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --text-color: #e0e0e0;
+            --accent-color: #bb86fc;
+            --card-bg: #1e1e1e;
+            --hover-color: #9965f4;
+        }
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 1rem;
+        }
+        .container {
+            text-align: center;
+            background-color: var(--card-bg);
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            max-width: 450px;
+            width: 100%;
+        }
+        h1 {
+            color: var(--accent-color);
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+            font-size: 1.8rem;
+        }
+        p {
+            color: #a0a0a0;
+            margin-bottom: 1.5rem;
+        }
+        button {
+            background-color: var(--accent-color);
+            color: #121212;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s ease, transform 0.1s ease;
+        }
+        button:hover {
+            background-color: var(--hover-color);
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        #result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: #2d2d2d;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            color: #e0e0e0;
+            white-space: pre-wrap;
+            text-align: left;
+            display: none;
+        }
+        #result.visible {
+            display: block;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .badge-cache {
+            background-color: #03dac6;
+            color: #121212;
+        }
+        .badge-fresh {
+            background-color: #cf6679;
+            color: #121212;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>MuleRun Scalingo App</h1>
+        <p>Application Node.js avec cache Redis (TTL 10s)</p>
+        <button id="fetchData">Récupérer les données</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        document.getElementById('fetchData').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = 'Chargement en cours...';
+            resultDiv.classList.add('visible');
+            
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                
+                const badgeClass = data.source === 'cache' ? 'badge-cache' : 'badge-fresh';
+                const badgeText = data.source === 'cache' ? 'PROVENANCE : CACHE (TTL 10s)' : 'PROVENANCE : DONNÉES FRAÎCHES';
+                
+                resultDiv.innerHTML = `<span class="badge ${badgeClass}">${badgeText}</span>\n\n${JSON.stringify(data.data, null, 2)}`;
+            } catch (error) {
+                resultDiv.innerHTML = '<span class="badge badge-fresh">ERREUR</span>\n\nImpossible de récupérer les données.';
+                console.error(error);
+            }
+        });
+    </script>
+</body>
+</html>
