@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Epistudy - Autonomous AI Learning Platform</title>
+  <title>Epistudy — Multi-Subject AI Learning Workspace</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -24,515 +24,931 @@
   </script>
   <style>
     * { scrollbar-width: thin; scrollbar-color: #334155 transparent; }
-    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes slideIn { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
-    @keyframes pulse-ring { 0% { transform: scale(0.8); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
     @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
     .animate-fadeIn { animation: fadeIn 0.4s ease-out forwards; }
     .animate-slideIn { animation: slideIn 0.3s ease-out forwards; }
+    .animate-float { animation: float 3s ease-in-out infinite; }
     .shimmer { background: linear-gradient(90deg, #1e293b 25%, #334155 50%, #1e293b 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
     .glass { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(99, 102, 241, 0.1); }
-    .glow { box-shadow: 0 0 20px rgba(99, 102, 241, 0.15); }
+    .glass-themed { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid var(--subject-border, rgba(99,102,241,0.15)); }
+    .glow { box-shadow: 0 0 24px var(--subject-glow, rgba(99, 102, 241, 0.15)); }
     .score-ring { transition: stroke-dashoffset 1s ease-out; }
+    .grid-bg { background-image: radial-gradient(circle at 1px 1px, rgba(148,163,184,0.08) 1px, transparent 0); background-size: 32px 32px; }
+    .subject-gradient { background: var(--subject-gradient, linear-gradient(135deg, #312e81 0%, #6366f1 100%)); }
     .mobile-menu-open { transform: translateX(0); }
-    @media (max-width: 768px) { .sidebar-mobile { transform: translateX(-100%); transition: transform 0.3s ease; } .sidebar-mobile.mobile-menu-open { transform: translateX(0); } }
+    @media (max-width: 768px) {
+      .sidebar-mobile { transform: translateX(-100%); transition: transform 0.3s ease; }
+      .sidebar-mobile.mobile-menu-open { transform: translateX(0); }
+    }
   </style>
 </head>
 <body class="bg-surface-950 text-white font-sans antialiased">
   <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect, useCallback, useRef, createContext, useContext } = React;
+  <script type="text/babel" data-presets="env,react">
+    const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
 
-    // ── API Service ──
+    // ── API Service ─────────────────────────────────────────────────────────
+    const j = (r) => r.json();
     const api = {
-      createPlan: (topic, level) => fetch('/api/plan', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({topic,level}) }).then(r=>r.json()),
-      getExercise: (sessionId) => fetch('/api/exercise', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId}) }).then(r=>r.json()),
-      evaluate: (sessionId, answer) => fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId,answer}) }).then(r=>r.json()),
-      coach: (sessionId) => fetch('/api/coach', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId}) }).then(r=>r.json()),
-      getSession: (sessionId) => fetch(`/api/session/${sessionId}`).then(r=>r.json()),
-      getHistory: (sessionId) => fetch(`/api/session/${sessionId}/history`).then(r=>r.json()),
+      // Subjects
+      listSubjects: () => fetch('/api/subjects').then(j),
+      createSubject: (data) => fetch('/api/subjects', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) }).then(j),
+      getSubject: (id) => fetch('/api/subjects/' + id).then(j),
+      deleteSubject: (id) => fetch('/api/subjects/' + id, { method:'DELETE' }).then(j),
+      recommend: (id) => fetch('/api/subjects/' + id + '/recommend', { method:'POST' }).then(j),
+      // Sessions (existing)
+      getExercise: (sessionId) => fetch('/api/exercise', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId}) }).then(j),
+      evaluate: (sessionId, answer) => fetch('/api/evaluate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId,answer}) }).then(j),
+      coach: (sessionId) => fetch('/api/coach', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({sessionId}) }).then(j),
+      getSession: (sessionId) => fetch('/api/session/' + sessionId).then(j),
+      getHistory: (sessionId) => fetch('/api/session/' + sessionId + '/history').then(j),
     };
 
-    // ── Context ──
+    // ── Context ─────────────────────────────────────────────────────────────
     const AppContext = createContext();
     const useApp = () => useContext(AppContext);
 
-    // ── Icons ──
-    const Icons = {
-      home: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>,
-      book: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>,
-      pencil: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>,
-      chart: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>,
-      brain: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>,
-      check: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>,
-      arrow: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>,
-      menu: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16"/></svg>,
-      close: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12"/></svg>,
-      sparkle: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>,
-      target: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth={1.5}/><circle cx="12" cy="12" r="6" strokeWidth={1.5}/><circle cx="12" cy="12" r="2" strokeWidth={1.5}/></svg>,
+    // ── Icon set (subject icons + UI icons) ─────────────────────────────────
+    const ICON = {
+      calculator: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" className="w-full h-full"><rect x="4" y="3" width="16" height="18" rx="2.5"/><line x1="8" y1="7" x2="16" y2="7"/><circle cx="8" cy="12" r=".8" fill={c}/><circle cx="12" cy="12" r=".8" fill={c}/><circle cx="16" cy="12" r=".8" fill={c}/><circle cx="8" cy="16" r=".8" fill={c}/><circle cx="12" cy="16" r=".8" fill={c}/><circle cx="16" cy="16" r=".8" fill={c}/></svg>,
+      code: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="14" y1="4" x2="10" y2="20"/></svg>,
+      atom: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.4" className="w-full h-full"><circle cx="12" cy="12" r="1.6" fill={c}/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg>,
+      leaf: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><path d="M11 20A7 7 0 0 1 4 13c0-4 3-9 13-11-1 10-5 14-9 14-2.5 0-5-2-5-5"/><path d="M2 22c4-3 6-5 9-9"/></svg>,
+      flask: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><path d="M9 3h6"/><path d="M10 3v6L5 19a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-10V3"/><path d="M7 16h10"/></svg>,
+      book: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+      globe: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" className="w-full h-full"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/></svg>,
+      briefcase: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
+      sparkles: (c='currentColor') => <svg viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="w-full h-full"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.7 2L22 20l-2.3 1l-.7 2l-.7-2L16 20l2.3-1z"/></svg>,
     };
 
-    // ── Score Ring Component ──
-    function ScoreRing({ score, max = 10, size = 80, label }) {
-      const pct = score / max;
+    const UI = {
+      home: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3"/></svg>,
+      grid: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5" strokeWidth={1.6}/><rect x="14" y="3" width="7" height="7" rx="1.5" strokeWidth={1.6}/><rect x="3" y="14" width="7" height="7" rx="1.6" strokeWidth={1.6}/><rect x="14" y="14" width="7" height="7" rx="1.5" strokeWidth={1.6}/></svg>,
+      plus: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeWidth={2} d="M12 5v14M5 12h14"/></svg>,
+      arrow: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/></svg>,
+      back: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7"/></svg>,
+      check: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M5 13l4 4L19 7"/></svg>,
+      brain: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>,
+      pencil: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>,
+      chart: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>,
+      target: <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" strokeWidth={1.6}/><circle cx="12" cy="12" r="6" strokeWidth={1.6}/><circle cx="12" cy="12" r="2" strokeWidth={1.6}/></svg>,
+      menu: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h16"/></svg>,
+      close: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12"/></svg>,
+      sparkle: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M13 3l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>,
+      trash: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/></svg>,
+      bolt: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>,
+    };
+
+    function SubjectIcon({ name, color = 'currentColor', className = 'w-6 h-6' }) {
+      const fn = ICON[name] || ICON.sparkles;
+      return <div className={className} style={{color}}>{fn(color)}</div>;
+    }
+
+    /* SECTION_COMPONENTS */
+
+    function ScoreRing({ score, max = 10, size = 80, label, color }) {
+      const pct = Math.max(0, Math.min(1, score / max));
       const r = (size - 8) / 2;
       const circ = 2 * Math.PI * r;
       const offset = circ * (1 - pct);
-      const color = pct >= 0.7 ? '#22c55e' : pct >= 0.4 ? '#eab308' : '#ef4444';
+      const auto = pct >= 0.7 ? '#22c55e' : pct >= 0.4 ? '#eab308' : '#ef4444';
+      const stroke = color || auto;
       return (
         <div className="relative inline-flex items-center justify-center">
           <svg width={size} height={size} className="-rotate-90">
             <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#1e293b" strokeWidth="6"/>
-            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth="6" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="score-ring"/>
+            <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={stroke} strokeWidth="6" strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round" className="score-ring"/>
           </svg>
           <div className="absolute flex flex-col items-center">
-            <span className="text-xl font-bold" style={{color}}>{score}</span>
+            <span className="text-xl font-bold" style={{color: stroke}}>{score}</span>
             {label && <span className="text-[10px] text-surface-200">{label}</span>}
           </div>
         </div>
       );
     }
 
-    // ── Loading Skeleton ──
     function Skeleton({ lines = 3 }) {
       return <div className="space-y-3">{Array.from({length:lines}).map((_,i)=><div key={i} className="shimmer h-4 rounded" style={{width:`${70+Math.random()*30}%`}}/>)}</div>;
     }
 
-    // ── Agent Badge ──
     function AgentBadge({ agent, time }) {
-      const colors = { 'Learning Planner':'bg-blue-500/20 text-blue-300 border-blue-500/30', 'Exercise Generator':'bg-purple-500/20 text-purple-300 border-purple-500/30', 'Evaluator':'bg-amber-500/20 text-amber-300 border-amber-500/30', 'Pedagogical Coach':'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+      const colors = {
+        'Learning Planner':'bg-blue-500/20 text-blue-300 border-blue-500/30',
+        'Exercise Generator':'bg-purple-500/20 text-purple-300 border-purple-500/30',
+        'Evaluator':'bg-amber-500/20 text-amber-300 border-amber-500/30',
+        'Pedagogical Coach':'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      };
       return (
         <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border ${colors[agent]||'bg-surface-700 text-surface-200 border-surface-700'}`}>
-          <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{backgroundColor:'currentColor'}}/><span className="relative inline-flex rounded-full h-2 w-2" style={{backgroundColor:'currentColor'}}/></span>
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{backgroundColor:'currentColor'}}/>
+            <span className="relative inline-flex rounded-full h-2 w-2" style={{backgroundColor:'currentColor'}}/>
+          </span>
           {agent}{time !== undefined && <span className="opacity-60">({time}ms)</span>}
         </div>
       );
     }
 
-    // ── Dashboard Page ──
-    function DashboardPage() {
-      const { state, setState } = useApp();
-      const [topic, setTopic] = useState('');
-      const [level, setLevel] = useState('beginner');
-      const [loading, setLoading] = useState(false);
+    function ProgressBar({ value, color }) {
+      return (
+        <div className="h-2 bg-surface-800 rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${Math.max(0,Math.min(100,value))}%`, background: color || 'linear-gradient(90deg,#6366f1,#8b5cf6)' }}/>
+        </div>
+      );
+    }
 
-      const handleCreate = async () => {
-        if (!topic.trim()) return;
+    function StatCard({ label, value, hint, color, icon }) {
+      return (
+        <div className="glass rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs uppercase tracking-wider text-surface-200">{label}</span>
+            {icon && <span style={{color}} className="opacity-80">{icon}</span>}
+          </div>
+          <div className="text-2xl font-bold" style={{color}}>{value}</div>
+          {hint && <div className="text-[11px] text-surface-200/70 mt-1">{hint}</div>}
+        </div>
+      );
+    }
+
+    function themeStyle(subject) {
+      if (!subject) return {};
+      const p = subject.palette || {};
+      return {
+        '--subject-primary': p.primary,
+        '--subject-accent': p.accent,
+        '--subject-bg': p.bg,
+        '--subject-border': p.border,
+        '--subject-glow': p.glow,
+        '--subject-text': p.text,
+        '--subject-gradient': p.gradient,
+      };
+    }
+
+    function timeAgo(iso) {
+      if (!iso) return 'never';
+      const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+      return Math.floor(diff/86400) + 'd ago';
+    }
+
+    function SubjectCard({ subject, onOpen, onDelete }) {
+      const p = subject.palette || {};
+      const progress = subject.progress ?? 0;
+      const chapters = `${subject.chaptersCompleted ?? 0}/${subject.totalChapters ?? 0}`;
+      return (
+        <div
+          onClick={()=>onOpen(subject.id)}
+          className="group relative cursor-pointer rounded-2xl p-5 border transition-all hover:-translate-y-0.5 hover:shadow-xl"
+          style={{ background: 'linear-gradient(180deg, rgba(15,23,42,0.6), rgba(15,23,42,0.9))', borderColor: p.border, boxShadow: `0 12px 30px -16px ${p.glow}` }}
+        >
+          <div className="flex items-start justify-between mb-4">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: p.gradient, color: '#fff' }}>
+              <SubjectIcon name={subject.icon} color="#fff" className="w-6 h-6"/>
+            </div>
+            <button
+              onClick={(e)=>{ e.stopPropagation(); onDelete(subject.id); }}
+              className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-surface-200 hover:text-red-300 hover:bg-red-500/10 transition-all"
+              title="Delete subject"
+            >{UI.trash}</button>
+          </div>
+          <h3 className="font-semibold text-lg leading-tight mb-1 line-clamp-1">{subject.title}</h3>
+          <p className="text-sm text-surface-200/80 mb-4 line-clamp-2 min-h-[2.5rem]">
+            {subject.description || subject.goal || `${subject.level} level · ${subject.domain} domain`}
+          </p>
+          <div className="mb-3">
+            <div className="flex items-center justify-between text-xs mb-1.5">
+              <span className="text-surface-200">Progress</span>
+              <span className="font-medium" style={{ color: p.text }}>{progress}%</span>
+            </div>
+            <ProgressBar value={progress} color={p.gradient}/>
+          </div>
+          <div className="flex items-center justify-between text-xs text-surface-200/70">
+            <span>{chapters} chapters · avg {subject.averageScore ?? 0}/10</span>
+            <span>{timeAgo(subject.lastActivity)}</span>
+          </div>
+          <div className="mt-4 flex items-center gap-1.5 flex-wrap">
+            <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>{subject.level}</span>
+            <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full bg-surface-800 text-surface-200">{subject.domain}</span>
+          </div>
+        </div>
+      );
+    }
+
+    function CoachBanner({ recommendation, subject, onAct }) {
+      if (!recommendation) return null;
+      const p = subject?.palette || {};
+      const tone = {
+        review_skill: { tag: 'Reinforce a weak skill', toneColor: '#f59e0b' },
+        review_chapter: { tag: 'Recover momentum', toneColor: '#f97316' },
+        challenge: { tag: 'Challenge ready', toneColor: '#10b981' },
+        next_chapter: { tag: 'Continue learning', toneColor: '#6366f1' },
+        start: { tag: 'Begin journey', toneColor: '#6366f1' },
+        mastery: { tag: 'Mastery within reach', toneColor: '#a855f7' },
+      }[recommendation.action] || { tag: 'Coach', toneColor: p.primary || '#6366f1' };
+      return (
+        <div className="relative overflow-hidden rounded-2xl p-5 md:p-6 mb-6"
+             style={{ background: 'linear-gradient(135deg, rgba(15,23,42,0.95), rgba(15,23,42,0.6))', border: `1px solid ${p.border || 'rgba(99,102,241,0.3)'}`, boxShadow: `0 20px 50px -20px ${p.glow || 'rgba(99,102,241,0.4)'}` }}>
+          <div className="absolute inset-0 opacity-30 pointer-events-none" style={{ background: p.gradient }}/>
+          <div className="relative flex flex-col md:flex-row md:items-center gap-4">
+            <div className="w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(15,23,42,0.7)', color: tone.toneColor, border: `1px solid ${p.border || 'rgba(255,255,255,0.1)'}` }}>
+              {UI.brain}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1 flex-wrap">
+                <span className="px-2 py-0.5 rounded-full text-[10px] uppercase tracking-wider font-semibold" style={{ background: 'rgba(0,0,0,0.4)', color: tone.toneColor, border: `1px solid ${tone.toneColor}55` }}>Pedagogical Coach · {tone.tag}</span>
+                {recommendation.stats?.weakestSkill && (
+                  <span className="text-[11px] text-surface-200/70">weakest: {recommendation.stats.weakestSkill.name} ({recommendation.stats.weakestSkill.mastery}%)</span>
+                )}
+              </div>
+              <h3 className="text-lg md:text-xl font-semibold mb-1">{recommendation.title}</h3>
+              <p className="text-sm text-surface-200/85">{recommendation.body}</p>
+            </div>
+            <button onClick={onAct} className="px-5 py-3 rounded-xl font-semibold text-sm flex items-center gap-2 text-white whitespace-nowrap" style={{ background: p.gradient || 'linear-gradient(135deg,#4f46e5,#7c3aed)' }}>
+              {UI.bolt} {recommendation.cta}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    /* END_SECTION_COMPONENTS */
+
+    /* SECTION_PAGES */
+
+    // ── Subject Hub (the new home page) ────────────────────────────────────
+    function SubjectHub() {
+      const { state, setState, refreshSubjects } = useApp();
+      const [creating, setCreating] = useState(false);
+
+      const handleOpen = (id) => setState((s) => ({ ...s, page: 'workspace', currentSubjectId: id, workspaceTab: 'overview' }));
+      const handleDelete = async (id) => {
+        if (!confirm('Delete this subject? Its history will be removed.')) return;
+        await api.deleteSubject(id);
+        await refreshSubjects();
+      };
+
+      const subjects = state.subjects || [];
+      const portfolio = state.portfolio || { subjectCount: 0, averageMastery: 0, masteredSkills: 0, totalSkills: 0, totalExercises: 0, activeDays: 0 };
+
+      return (
+        <div className="animate-fadeIn max-w-6xl mx-auto">
+          {/* Hero */}
+          <div className="mb-8">
+            <div className="flex items-start justify-between gap-4 mb-2">
+              <div>
+                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-xs mb-3">
+                  {UI.sparkle} Multi-Subject Learning Workspace
+                </div>
+                <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-white via-brand-200 to-brand-400 bg-clip-text text-transparent">
+                  Your Subject Hub
+                </h1>
+                <p className="text-surface-200 mt-2 max-w-xl">Each subject is an autonomous learning workspace with its own plan, coach, exercises, and skill graph.</p>
+              </div>
+              <button onClick={()=>setCreating(true)} className="hidden md:inline-flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 rounded-xl font-semibold text-sm transition-all">
+                {UI.plus} New Subject
+              </button>
+            </div>
+          </div>
+
+          {/* Portfolio analytics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+            <StatCard label="Active Subjects" value={portfolio.subjectCount} hint="across your workspace" color="#a4b8fc" icon={UI.grid}/>
+            <StatCard label="Avg Mastery" value={portfolio.averageMastery + '%'} hint="weighted across skills" color="#22c55e" icon={UI.target}/>
+            <StatCard label="Mastered Skills" value={`${portfolio.masteredSkills}/${portfolio.totalSkills}`} hint="≥80% mastery" color="#f59e0b" icon={UI.check}/>
+            <StatCard label="Total Exercises" value={portfolio.totalExercises} hint={`${portfolio.activeDays} active days`} color="#a855f7" icon={UI.chart}/>
+          </div>
+
+          {/* Grid */}
+          {subjects.length === 0 ? (
+            <div className="glass rounded-2xl p-12 text-center grid-bg">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-brand-500/15 text-brand-300 flex items-center justify-center mb-4">{UI.sparkle}</div>
+              <h2 className="text-xl font-semibold mb-2">Create your first learning subject</h2>
+              <p className="text-surface-200 max-w-md mx-auto mb-5">From mathematics to programming or biology — each subject gets its own AI coach, roadmap, skill graph and visual identity.</p>
+              <button onClick={()=>setCreating(true)} className="inline-flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 rounded-xl font-semibold text-sm transition-all">
+                {UI.plus} Create Subject
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {subjects.map((s) => (
+                <SubjectCard key={s.id} subject={s} onOpen={handleOpen} onDelete={handleDelete}/>
+              ))}
+              <button
+                onClick={()=>setCreating(true)}
+                className="rounded-2xl border border-dashed border-surface-700 hover:border-brand-500/60 hover:bg-brand-500/5 transition-all flex flex-col items-center justify-center p-8 text-surface-200 hover:text-brand-200 min-h-[240px]"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-surface-800 group-hover:bg-brand-500/20 flex items-center justify-center mb-3">{UI.plus}</div>
+                <span className="font-medium">New Subject</span>
+                <span className="text-xs text-surface-200/70 mt-1">Auto-themed in seconds</span>
+              </button>
+            </div>
+          )}
+
+          {/* FAB on mobile */}
+          <button onClick={()=>setCreating(true)} className="md:hidden fixed bottom-6 right-6 w-14 h-14 rounded-full bg-brand-600 text-white shadow-xl flex items-center justify-center">{UI.plus}</button>
+
+          {creating && <CreateSubjectModal onClose={()=>setCreating(false)} onCreated={() => { setCreating(false); refreshSubjects(); }}/>}
+        </div>
+      );
+    }
+
+    // ── Create Subject flow ────────────────────────────────────────────────
+    const SUGGEST_THEMES = [
+      { key: 'mathematics', icon: 'calculator', label: 'Mathematics', primary: '#3b82f6' },
+      { key: 'programming', icon: 'code', label: 'Programming', primary: '#22c55e' },
+      { key: 'physics', icon: 'atom', label: 'Physics', primary: '#a855f7' },
+      { key: 'biology', icon: 'leaf', label: 'Biology', primary: '#10b981' },
+      { key: 'chemistry', icon: 'flask', label: 'Chemistry', primary: '#f43f5e' },
+      { key: 'history', icon: 'book', label: 'History', primary: '#f59e0b' },
+      { key: 'language', icon: 'globe', label: 'Language & Lit.', primary: '#06b6d4' },
+      { key: 'business', icon: 'briefcase', label: 'Business', primary: '#6366f1' },
+    ];
+
+    function autoPreview(title) {
+      const t = (title || '').toLowerCase();
+      const tests = [
+        ['mathematics', ['math', 'algebra', 'calculus', 'geometry', 'trigonom']],
+        ['programming', ['program', 'cod', 'python', 'react', 'javascript', 'java', 'rust', 'algorithm', 'software', 'web dev', 'machine learning', 'deep learning', 'neural', 'data science', 'computer science']],
+        ['physics', ['physic', 'mechanic', 'quantum', 'relativity']],
+        ['biology', ['bio', 'cell', 'genet', 'ecolog', 'anatomy']],
+        ['chemistry', ['chem', 'molec', 'reaction']],
+        ['history', ['history', 'civiliz', 'ancient', 'medieval', 'revolution']],
+        ['language', ['english', 'french', 'literature', 'grammar', 'writing', 'language']],
+        ['business', ['business', 'finance', 'marketing', 'management', 'economic']],
+      ];
+      for (const [k, words] of tests) {
+        if (words.some((w) => t.includes(w))) return SUGGEST_THEMES.find((x) => x.key === k);
+      }
+      return { key: 'default', icon: 'sparkles', label: 'General', primary: '#6366f1' };
+    }
+
+    function CreateSubjectModal({ onClose, onCreated }) {
+      const [title, setTitle] = useState('');
+      const [goal, setGoal] = useState('');
+      const [level, setLevel] = useState('beginner');
+      const [description, setDescription] = useState('');
+      const [loading, setLoading] = useState(false);
+      const preview = autoPreview(title);
+
+      const submit = async () => {
+        if (!title.trim()) return;
         setLoading(true);
         try {
-          const res = await api.createPlan(topic.trim(), level);
+          const res = await api.createSubject({ title: title.trim(), goal: goal.trim(), description: description.trim(), level });
           if (res.error) throw new Error(res.error);
-          setState(s => ({ ...s, sessionId: res.sessionId, plan: res.plan, page: 'program' }));
+          onCreated(res.subject);
         } catch (e) { alert('Error: ' + e.message); }
         setLoading(false);
       };
 
-      const suggestions = ['Machine Learning', 'Web Development', 'Data Structures', 'Financial Analysis', 'Creative Writing', 'Quantum Physics'];
+      const suggestions = ['Machine Learning', 'High School Mathematics', 'React Development', 'Cell Biology', 'French Literature', 'Quantum Physics'];
 
       return (
-        <div className="animate-fadeIn max-w-3xl mx-auto">
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-300 text-sm mb-6">
-              {Icons.sparkle} Autonomous AI Learning Platform
-            </div>
-            <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-to-r from-white via-brand-200 to-brand-400 bg-clip-text text-transparent">What do you want to learn?</h1>
-            <p className="text-surface-200 text-lg max-w-xl mx-auto">Enter a topic and your level. Our AI agents will create a personalized learning journey, generate exercises, evaluate your progress, and adapt in real-time.</p>
-          </div>
-
-          <div className="glass rounded-2xl p-6 md:p-8 glow mb-8">
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-surface-200 mb-2">Topic</label>
-              <input type="text" value={topic} onChange={e=>setTopic(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleCreate()} placeholder="e.g., Machine Learning, Python, Calculus..." className="w-full px-4 py-3 bg-surface-900 border border-surface-700 rounded-xl text-white placeholder-surface-200/50 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"/>
-            </div>
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-surface-200 mb-2">Your Level</label>
-              <div className="grid grid-cols-3 gap-3">
-                {[['beginner','Beginner','New to the topic'],['intermediate','Intermediate','Some experience'],['advanced','Advanced','Strong foundation']].map(([val,label,desc])=>(
-                  <button key={val} onClick={()=>setLevel(val)} className={`p-3 rounded-xl border text-left transition-all ${level===val?'bg-brand-500/10 border-brand-500 text-white':'bg-surface-900 border-surface-700 text-surface-200 hover:border-surface-200'}`}>
-                    <div className="font-medium text-sm">{label}</div>
-                    <div className="text-xs opacity-60 mt-0.5">{desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button onClick={handleCreate} disabled={loading||!topic.trim()} className="w-full py-3.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold text-white transition-all flex items-center justify-center gap-2">
-              {loading ? <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Generating Plan...</> : <>{Icons.sparkle} Create Learning Program</>}
-            </button>
-          </div>
-
-          <div>
-            <p className="text-sm text-surface-200 mb-3">Popular topics</p>
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map(s=>(
-                <button key={s} onClick={()=>setTopic(s)} className="px-3 py-1.5 bg-surface-800 hover:bg-surface-700 border border-surface-700 rounded-lg text-sm text-surface-200 transition-all">{s}</button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-12 grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[['Learning Planner','Analyzes your topic and creates a structured roadmap','bg-blue-500/10 text-blue-400'],['Exercise Generator','Generates adaptive exercises at your level','bg-purple-500/10 text-purple-400'],['Evaluator','Scores your answers with detailed feedback','bg-amber-500/10 text-amber-400'],['Pedagogical Coach','Autonomously adapts your learning path','bg-emerald-500/10 text-emerald-400']].map(([name,desc,cls])=>(
-              <div key={name} className="glass rounded-xl p-4">
-                <div className={`w-8 h-8 rounded-lg ${cls} flex items-center justify-center mb-3`}>{Icons.brain}</div>
-                <h3 className="font-semibold text-sm mb-1">{name}</h3>
-                <p className="text-xs text-surface-200">{desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    // ── Program Page ──
-    function ProgramPage() {
-      const { state, setState } = useApp();
-      const { plan, sessionId } = state;
-      if (!plan) return null;
-
-      const totalChapters = plan.chapters.length;
-      const completedCount = state.completedChapters?.length || 0;
-      const progress = totalChapters > 0 ? Math.round((completedCount / totalChapters) * 100) : 0;
-
-      return (
-        <div className="animate-fadeIn max-w-4xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <h1 className="text-2xl font-bold">{plan.topic}</h1>
-              <p className="text-surface-200 text-sm mt-1">{plan.level} level &middot; {plan.estimatedDuration} &middot; {plan.domain} domain</p>
-            </div>
-            <button onClick={()=>setState(s=>({...s, page:'exercise'}))} className="px-5 py-2.5 bg-brand-600 hover:bg-brand-500 rounded-xl font-medium text-sm transition-all flex items-center gap-2">
-              Start Learning {Icons.arrow}
-            </button>
-          </div>
-
-          <div className="glass rounded-xl p-4 mb-8">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">Progress</span>
-              <span className="text-sm text-brand-300">{progress}%</span>
-            </div>
-            <div className="h-2 bg-surface-800 rounded-full overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-brand-500 to-brand-400 rounded-full transition-all duration-500" style={{width:`${progress}%`}}/>
-            </div>
-            <div className="flex justify-between mt-2 text-xs text-surface-200">
-              <span>{completedCount} of {totalChapters} chapters</span>
-              <span>{plan.estimatedDuration}</span>
-            </div>
-          </div>
-
-          <div className="mb-8">
-            <h2 className="text-lg font-semibold mb-4">Learning Objectives</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {plan.objectives.map((obj,i)=>(
-                <div key={i} className="flex items-start gap-3 p-3 bg-surface-800/50 rounded-lg">
-                  <div className="w-6 h-6 rounded-full bg-brand-500/20 text-brand-300 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{i+1}</div>
-                  <span className="text-sm text-surface-200">{obj}</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
+          <div className="relative w-full max-w-2xl bg-surface-900 border border-surface-700 rounded-3xl overflow-hidden">
+            <div className="absolute top-0 left-0 right-0 h-32 opacity-50" style={{ background: `linear-gradient(135deg, ${preview.primary}, transparent)` }}/>
+            <div className="relative p-6 md:p-8">
+              <div className="flex items-start justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: preview.primary }}>
+                    <SubjectIcon name={preview.icon} color="#fff" className="w-6 h-6"/>
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold">Create a learning subject</h2>
+                    <p className="text-xs text-surface-200">Theme auto-assigned: <span style={{color: preview.primary}} className="font-medium">{preview.label}</span></p>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
+                <button onClick={onClose} className="text-surface-200 hover:text-white">{UI.close}</button>
+              </div>
 
-          <h2 className="text-lg font-semibold mb-4">Learning Roadmap</h2>
-          <div className="space-y-3">
-            {plan.chapters.map((ch, i) => {
-              const isCompleted = state.completedChapters?.includes(i);
-              const isCurrent = i === (state.currentChapterIndex || 0);
-              return (
-                <div key={i} className={`glass rounded-xl p-5 transition-all ${isCurrent?'border-brand-500/40 glow':''} ${isCompleted?'opacity-80':''}`}>
-                  <div className="flex items-start gap-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm ${isCompleted?'bg-green-500/20 text-green-300':isCurrent?'bg-brand-500/20 text-brand-300':'bg-surface-700 text-surface-200'}`}>
-                      {isCompleted ? Icons.check : i + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold">{ch.title}</h3>
-                        {isCurrent && <span className="px-2 py-0.5 bg-brand-500/20 text-brand-300 text-xs rounded-full">Current</span>}
-                        {isCompleted && <span className="px-2 py-0.5 bg-green-500/20 text-green-300 text-xs rounded-full">Completed</span>}
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {ch.objectives.map((obj,j)=>(
-                          <span key={j} className="text-xs px-2 py-0.5 bg-surface-700/50 rounded text-surface-200">{obj}</span>
-                        ))}
-                      </div>
-                      <div className="text-xs text-surface-200">~{ch.estimatedTime} min</div>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-surface-200 mb-1.5 uppercase tracking-wider">Subject title</label>
+                  <input type="text" value={title} onChange={(e)=>setTitle(e.target.value)} placeholder="e.g., Machine Learning, French Literature, Trigonometry…"
+                    className="w-full px-4 py-3 bg-surface-950 border border-surface-700 rounded-xl text-white placeholder-surface-200/40 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"/>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-surface-200 mb-1.5 uppercase tracking-wider">Learning goal (optional)</label>
+                    <input type="text" value={goal} onChange={(e)=>setGoal(e.target.value)} placeholder="What do you want to achieve?"
+                      className="w-full px-4 py-3 bg-surface-950 border border-surface-700 rounded-xl text-white placeholder-surface-200/40 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all"/>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-surface-200 mb-1.5 uppercase tracking-wider">Level</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {['beginner','intermediate','advanced'].map((l) => (
+                        <button key={l} onClick={()=>setLevel(l)} className={`py-2.5 rounded-xl text-xs font-medium capitalize border transition-all ${level===l?'bg-brand-500/15 border-brand-500 text-white':'bg-surface-950 border-surface-700 text-surface-200 hover:border-surface-200'}`}>{l}</button>
+                      ))}
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <div>
+                  <label className="block text-xs font-medium text-surface-200 mb-1.5 uppercase tracking-wider">Short description (optional)</label>
+                  <textarea value={description} onChange={(e)=>setDescription(e.target.value)} rows={2} placeholder="Why this subject? Any context the coach should know?"
+                    className="w-full px-4 py-3 bg-surface-950 border border-surface-700 rounded-xl text-white placeholder-surface-200/40 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all resize-none"/>
+                </div>
+                <div>
+                  <div className="text-xs text-surface-200 mb-2">Try one of these</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {suggestions.map((s) => (
+                      <button key={s} onClick={()=>setTitle(s)} className="px-3 py-1.5 text-xs rounded-lg bg-surface-800 hover:bg-surface-700 border border-surface-700 text-surface-200">{s}</button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          {plan.agentMeta && <div className="mt-6"><AgentBadge agent={plan.agentMeta.agent} time={plan.agentMeta.processingTime}/></div>}
+              <div className="mt-6 flex gap-2">
+                <button onClick={onClose} className="px-5 py-3 rounded-xl bg-surface-800 hover:bg-surface-700 text-surface-200 text-sm font-medium">Cancel</button>
+                <button onClick={submit} disabled={loading || !title.trim()} className="flex-1 px-5 py-3 rounded-xl text-white font-semibold text-sm disabled:opacity-40 transition-all flex items-center justify-center gap-2" style={{ background: preview.primary }}>
+                  {loading ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Bootstrapping workspace…</> : <>{UI.sparkle} Create & open workspace</>}
+                </button>
+              </div>
+              <p className="text-[11px] text-surface-200/60 mt-3 text-center">Planner agent will generate the roadmap, skill graph, and coach context automatically.</p>
+            </div>
+          </div>
         </div>
       );
     }
+    /* END_SECTION_PAGES_1 */
 
-    // ── Exercise Page ──
-    function ExercisePage() {
-      const { state, setState } = useApp();
+    // ── Subject Workspace ──────────────────────────────────────────────────
+    const WORKSPACE_TABS = [
+      { id: 'overview', label: 'Overview', icon: UI.home },
+      { id: 'courses', label: 'Courses', icon: UI.grid },
+      { id: 'exercises', label: 'Exercises', icon: UI.pencil },
+      { id: 'evaluation', label: 'Evaluation', icon: UI.target },
+      { id: 'skills', label: 'Skills', icon: UI.brain },
+      { id: 'history', label: 'History', icon: UI.chart },
+    ];
+
+    function SubjectWorkspace() {
+      const { state, setState, refreshSubjects } = useApp();
+      const [data, setData] = useState(null);
+      const [loading, setLoading] = useState(true);
       const [exercise, setExercise] = useState(null);
       const [answer, setAnswer] = useState('');
-      const [loading, setLoading] = useState(false);
-      const [showHint, setShowHint] = useState(false);
+      const [lastEvaluation, setLastEvaluation] = useState(null);
+      const [coachResult, setCoachResult] = useState(null);
+      const [history, setHistory] = useState(null);
+      const [busy, setBusy] = useState(false);
 
-      const fetchExercise = useCallback(async () => {
-        setLoading(true);
+      const tab = state.workspaceTab || 'overview';
+      const setTab = (id) => setState((s) => ({ ...s, workspaceTab: id }));
+
+      const refresh = useCallback(async () => {
+        if (!state.currentSubjectId) return;
+        const res = await api.getSubject(state.currentSubjectId);
+        if (!res.error) setData(res);
+        if (state.currentSubjectId && res?.session?.id) {
+          const h = await api.getHistory(res.session.id);
+          setHistory(h);
+        }
+        setLoading(false);
+      }, [state.currentSubjectId]);
+
+      useEffect(() => { setLoading(true); refresh(); }, [refresh]);
+
+      const subject = data?.subject;
+      const session = data?.session;
+      const analytics = data?.analytics;
+      const recommendation = data?.recommendation;
+
+      const sessionId = session?.id;
+
+      const generateExercise = async () => {
+        if (!sessionId) return;
+        setBusy(true);
         try {
-          const res = await api.getExercise(state.sessionId);
+          const res = await api.getExercise(sessionId);
           if (res.error) throw new Error(res.error);
           setExercise(res.exercise);
           setAnswer('');
-          setShowHint(false);
-          setState(s => ({ ...s, currentExercise: res.exercise }));
+          setLastEvaluation(null);
+          setCoachResult(null);
+          setTab('exercises');
         } catch (e) { alert('Error: ' + e.message); }
-        setLoading(false);
-      }, [state.sessionId]);
-
-      useEffect(() => { fetchExercise(); }, []);
-
-      const handleSubmit = async () => {
-        if (!answer.trim() || answer.trim().length < 10) { alert('Please provide a more detailed answer (at least 10 characters).'); return; }
-        setLoading(true);
-        try {
-          const res = await api.evaluate(state.sessionId, answer);
-          if (res.error) throw new Error(res.error);
-          setState(s => ({ ...s, lastEvaluation: res.evaluation, page: 'evaluation' }));
-        } catch (e) { alert('Error: ' + e.message); }
-        setLoading(false);
+        setBusy(false);
       };
 
-      if (loading && !exercise) return <div className="max-w-3xl mx-auto"><Skeleton lines={8}/></div>;
-      if (!exercise) return null;
-
-      return (
-        <div className="animate-fadeIn max-w-3xl mx-auto">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="px-3 py-1 bg-brand-500/10 text-brand-300 rounded-lg text-sm font-medium">
-              Chapter {exercise.chapter.index + 1}: {exercise.chapter.title}
-            </div>
-            <div className="px-3 py-1 bg-surface-700 text-surface-200 rounded-lg text-sm">
-              Difficulty: {exercise.difficultyLabel}
-            </div>
-          </div>
-
-          <div className="glass rounded-2xl p-6 md:p-8 glow mb-6">
-            <div className="flex items-center gap-2 mb-4">
-              {Icons.pencil}
-              <h2 className="text-lg font-semibold">Exercise</h2>
-              <span className="text-xs px-2 py-0.5 bg-purple-500/20 text-purple-300 rounded-full ml-auto">{exercise.exercise.type.replace('_',' ')}</span>
-            </div>
-            <div className="text-surface-200 text-sm mb-4 p-3 bg-surface-800/50 rounded-lg">{exercise.exercise.instructions}</div>
-            <div className="text-white leading-relaxed mb-6 text-base">{exercise.exercise.question}</div>
-
-            {exercise.context?.realWorldConnection && (
-              <div className="p-3 bg-blue-500/5 border border-blue-500/10 rounded-lg mb-6">
-                <div className="text-xs font-medium text-blue-300 mb-1">Real-world connection</div>
-                <div className="text-sm text-surface-200">{exercise.context.realWorldConnection}</div>
-              </div>
-            )}
-
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-surface-200 mb-2">Your Answer</label>
-              <textarea value={answer} onChange={e=>setAnswer(e.target.value)} rows={8} placeholder="Write your detailed answer here..." className="w-full px-4 py-3 bg-surface-900 border border-surface-700 rounded-xl text-white placeholder-surface-200/50 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all resize-none"/>
-              <div className="flex justify-between mt-2">
-                <button onClick={()=>setShowHint(!showHint)} className="text-sm text-brand-300 hover:text-brand-200 transition-colors">
-                  {showHint ? 'Hide hint' : 'Show hint'}
-                </button>
-                <span className="text-xs text-surface-200">{answer.length} characters</span>
-              </div>
-              {showHint && <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/10 rounded-lg text-sm text-amber-200">{exercise.exercise.hint}</div>}
-            </div>
-
-            <button onClick={handleSubmit} disabled={loading||answer.trim().length<10} className="w-full py-3.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl font-semibold transition-all flex items-center justify-center gap-2">
-              {loading ? <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Evaluating...</> : 'Submit Answer'}
-            </button>
-          </div>
-
-          {exercise.agentMeta && <AgentBadge agent={exercise.agentMeta.agent} time={exercise.agentMeta.processingTime}/>}
-        </div>
-      );
-    }
-
-    // ── Evaluation Page ──
-    function EvaluationPage() {
-      const { state, setState } = useApp();
-      const [coachResult, setCoachResult] = useState(null);
-      const [loading, setLoading] = useState(false);
-      const ev = state.lastEvaluation;
-      if (!ev) { setState(s=>({...s,page:'dashboard'})); return null; }
-
-      const getCoach = async () => {
-        setLoading(true);
+      const submitAnswer = async () => {
+        if (!sessionId || answer.trim().length < 10) { alert('Please write at least 10 characters.'); return; }
+        setBusy(true);
         try {
-          const res = await api.coach(state.sessionId);
+          const res = await api.evaluate(sessionId, answer);
+          if (res.error) throw new Error(res.error);
+          setLastEvaluation(res.evaluation);
+          setTab('evaluation');
+          await refresh();
+          await refreshSubjects();
+        } catch (e) { alert('Error: ' + e.message); }
+        setBusy(false);
+      };
+
+      const askCoach = async () => {
+        if (!sessionId) return;
+        setBusy(true);
+        try {
+          const res = await api.coach(sessionId);
           if (res.error) throw new Error(res.error);
           setCoachResult(res.coaching);
-          // Update session state
-          const sessionRes = await api.getSession(state.sessionId);
-          if (sessionRes.session) {
-            setState(s => ({ ...s, completedChapters: sessionRes.session.completedChapters, currentChapterIndex: sessionRes.session.currentChapterIndex }));
-          }
+          await refresh();
+          await refreshSubjects();
         } catch (e) { alert('Error: ' + e.message); }
-        setLoading(false);
+        setBusy(false);
       };
 
-      const decisionColors = { advance:'text-green-300 bg-green-500/10 border-green-500/20', repeat:'text-amber-300 bg-amber-500/10 border-amber-500/20', simplify:'text-blue-300 bg-blue-500/10 border-blue-500/20', increase_difficulty:'text-purple-300 bg-purple-500/10 border-purple-500/20', review_previous_chapter:'text-orange-300 bg-orange-500/10 border-orange-500/20' };
-      const decisionLabels = { advance:'Advance to next chapter', repeat:'Practice current chapter', simplify:'Reduce difficulty', increase_difficulty:'Increase difficulty', review_previous_chapter:'Review previous chapter' };
+      const onCoachAct = () => {
+        if (!recommendation) return;
+        if (recommendation.action === 'review_chapter' || recommendation.action === 'review_skill') setTab('courses');
+        generateExercise();
+      };
+
+      if (loading || !subject) {
+        return <div className="max-w-4xl mx-auto"><Skeleton lines={8}/></div>;
+      }
+
+      const back = () => setState((s) => ({ ...s, page: 'hub', currentSubjectId: null }));
 
       return (
-        <div className="animate-fadeIn max-w-3xl mx-auto">
-          <div className="glass rounded-2xl p-6 md:p-8 glow mb-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">Evaluation Results</h2>
-              <ScoreRing score={ev.score} label="/10"/>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-              <div className="p-4 bg-green-500/5 border border-green-500/10 rounded-xl">
-                <h3 className="text-sm font-semibold text-green-300 mb-2">Strengths</h3>
-                <ul className="space-y-1.5">{ev.strengths.map((s,i)=><li key={i} className="text-sm text-surface-200 flex items-start gap-2"><span className="text-green-400 mt-0.5">+</span>{s}</li>)}</ul>
-              </div>
-              <div className="p-4 bg-red-500/5 border border-red-500/10 rounded-xl">
-                <h3 className="text-sm font-semibold text-red-300 mb-2">Areas to Improve</h3>
-                <ul className="space-y-1.5">{ev.weaknesses.map((w,i)=><li key={i} className="text-sm text-surface-200 flex items-start gap-2"><span className="text-red-400 mt-0.5">-</span>{w}</li>)}</ul>
-              </div>
-            </div>
-
-            <div className="p-4 bg-surface-800/50 rounded-xl mb-6">
-              <h3 className="text-sm font-semibold mb-2">Feedback</h3>
-              <p className="text-sm text-surface-200 leading-relaxed">{ev.feedback}</p>
-            </div>
-
-            {ev.misconceptions?.length > 0 && (
-              <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-xl mb-6">
-                <h3 className="text-sm font-semibold text-amber-300 mb-2">Detected Misconceptions</h3>
-                <ul className="space-y-1">{ev.misconceptions.map((m,i)=><li key={i} className="text-sm text-surface-200">{m}</li>)}</ul>
-              </div>
-            )}
-
-            {ev.analysis && (
-              <div className="flex items-center gap-4 p-3 bg-surface-800/30 rounded-lg mb-6 text-sm">
-                <span className="text-surface-200">Performance: <span className="text-white font-medium">{ev.analysis.performanceLevel}</span></span>
-                <span className="text-surface-700">|</span>
-                <span className="text-surface-200">Trend: <span className="text-white font-medium">{ev.analysis.trend}</span></span>
-                <span className="text-surface-700">|</span>
-                <span className="text-surface-200">Average: <span className="text-white font-medium">{ev.analysis.runningAverage}/10</span></span>
-              </div>
-            )}
-
-            {!coachResult && (
-              <button onClick={getCoach} disabled={loading} className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-xl font-semibold transition-all flex items-center justify-center gap-2">
-                {loading ? <><span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Coach is analyzing...</> : <>{Icons.brain} Get Coach Decision</>}
+        <div className="animate-fadeIn max-w-6xl mx-auto" style={themeStyle(subject)}>
+          {/* Header banner */}
+          <div className="mb-6 rounded-3xl overflow-hidden relative">
+            <div className="absolute inset-0 opacity-90" style={{ background: subject.palette.gradient }}/>
+            <div className="absolute inset-0 grid-bg opacity-20"/>
+            <div className="relative p-6 md:p-8 flex flex-col md:flex-row md:items-center gap-5">
+              <button onClick={back} className="absolute top-4 left-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-black/30 hover:bg-black/50 text-white/90 text-xs font-medium backdrop-blur">
+                {UI.back} Hub
               </button>
-            )}
+              <div className="w-16 h-16 rounded-2xl bg-white/15 backdrop-blur flex items-center justify-center ring-1 ring-white/20">
+                <SubjectIcon name={subject.icon} color="#fff" className="w-8 h-8"/>
+              </div>
+              <div className="flex-1 min-w-0 pt-6 md:pt-0">
+                <div className="flex items-center gap-2 text-xs text-white/80 mb-1.5">
+                  <span className="px-2 py-0.5 rounded-full bg-white/15 backdrop-blur uppercase tracking-wider">{subject.level}</span>
+                  <span>·</span>
+                  <span>{subject.domain} domain</span>
+                  <span>·</span>
+                  <span>updated {timeAgo(subject.lastActivity)}</span>
+                </div>
+                <h1 className="text-2xl md:text-3xl font-bold text-white">{subject.title}</h1>
+                {subject.goal && <p className="text-white/80 text-sm mt-1">{subject.goal}</p>}
+              </div>
+              <div className="flex items-center gap-4">
+                <ScoreRing score={analytics?.averageScore || 0} size={72} label="avg" color="#fff"/>
+                <div className="text-right hidden md:block">
+                  <div className="text-2xl font-bold text-white">{analytics?.mastery || 0}%</div>
+                  <div className="text-xs text-white/80">mastery</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          {coachResult && (
-            <div className="glass rounded-2xl p-6 glow mb-6 animate-fadeIn">
-              <div className="flex items-center gap-2 mb-4">
-                {Icons.brain}
-                <h2 className="text-lg font-semibold">Coach Decision</h2>
-              </div>
-              <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium mb-4 ${decisionColors[coachResult.decision]||'bg-surface-700 text-white border-surface-600'}`}>
-                {decisionLabels[coachResult.decision] || coachResult.decision}
-              </div>
-              <p className="text-sm text-surface-200 leading-relaxed mb-4">{coachResult.reason}</p>
-              {coachResult.recommendations?.length > 0 && (
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold mb-2">Recommendations</h3>
-                  <ul className="space-y-1.5">{coachResult.recommendations.map((r,i)=><li key={i} className="text-sm text-surface-200 flex items-start gap-2"><span className="text-brand-300 mt-0.5">{Icons.arrow}</span>{r}</li>)}</ul>
-                </div>
-              )}
-              {coachResult.report?.expectedOutcome && (
-                <div className="p-3 bg-brand-500/5 border border-brand-500/10 rounded-lg text-sm text-surface-200 mb-4">
-                  <span className="font-medium text-brand-300">Expected outcome: </span>{coachResult.report.expectedOutcome}
-                </div>
-              )}
-              <div className="flex gap-3">
-                <button onClick={()=>setState(s=>({...s,page:'exercise'}))} className="flex-1 py-3 bg-brand-600 hover:bg-brand-500 rounded-xl font-semibold transition-all">Continue Learning</button>
-                <button onClick={()=>setState(s=>({...s,page:'history'}))} className="px-5 py-3 bg-surface-700 hover:bg-surface-600 rounded-xl font-medium transition-all">View History</button>
-              </div>
-            </div>
-          )}
+          {/* Coach recommendation */}
+          <CoachBanner recommendation={recommendation} subject={subject} onAct={onCoachAct}/>
 
-          {ev.agentMeta && <AgentBadge agent={ev.agentMeta.agent} time={ev.agentMeta.processingTime}/>}
-          {coachResult?.agentMeta && <div className="mt-2"><AgentBadge agent={coachResult.agentMeta.agent} time={coachResult.agentMeta.processingTime}/></div>}
-        </div>
-      );
-    }
-
-    // ── History Page ──
-    function HistoryPage() {
-      const { state } = useApp();
-      const [history, setHistory] = useState(null);
-      const [analytics, setAnalytics] = useState(null);
-
-      useEffect(() => {
-        if (!state.sessionId) return;
-        Promise.all([api.getHistory(state.sessionId), api.getSession(state.sessionId)]).then(([h, s]) => {
-          setHistory(h);
-          setAnalytics(s.analytics);
-        });
-      }, [state.sessionId, state.page]);
-
-      if (!history || !analytics) return <div className="max-w-3xl mx-auto"><Skeleton lines={6}/></div>;
-
-      return (
-        <div className="animate-fadeIn max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold mb-6">Learning Analytics</h1>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            {[['Mastery',`${analytics.mastery}%`,'text-brand-300'],['Chapters',`${analytics.chaptersCompleted}/${analytics.totalChapters}`,'text-green-300'],['Avg Score',`${analytics.averageScore}/10`,'text-amber-300'],['Trend',analytics.trend==='improving'?'Improving':analytics.trend==='declining'?'Declining':'Stable',analytics.trend==='improving'?'text-green-300':'text-surface-200']].map(([label,val,cls])=>(
-              <div key={label} className="glass rounded-xl p-4 text-center">
-                <div className={`text-2xl font-bold ${cls}`}>{val}</div>
-                <div className="text-xs text-surface-200 mt-1">{label}</div>
-              </div>
+          {/* Tab strip */}
+          <div className="flex items-center gap-1 mb-6 overflow-x-auto pb-1">
+            {WORKSPACE_TABS.map((t) => (
+              <button key={t.id} onClick={()=>setTab(t.id)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${tab===t.id?'text-white':'text-surface-200 hover:text-white hover:bg-surface-800/50'}`} style={tab===t.id?{ background: subject.palette.bg, border:`1px solid ${subject.palette.border}`, color: subject.palette.text }:{}}>
+                {t.icon} {t.label}
+              </button>
             ))}
           </div>
 
-          {history.scores.length > 0 && (
-            <div className="glass rounded-xl p-5 mb-8">
-              <h2 className="font-semibold mb-4">Score Progression</h2>
-              <div className="flex items-end gap-2 h-32">
-                {history.scores.map((s,i) => (
-                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                    <span className="text-xs text-surface-200">{s}</span>
-                    <div className="w-full rounded-t" style={{height:`${(s/10)*100}%`, backgroundColor: s>=7?'#22c55e':s>=4?'#eab308':'#ef4444', opacity:0.7+i/history.scores.length*0.3, minHeight:'4px'}}/>
-                    <span className="text-[10px] text-surface-200">#{i+1}</span>
+          {tab === 'overview' && <OverviewTab subject={subject} session={session} analytics={analytics} onAct={generateExercise} onAskCoach={askCoach} coachResult={coachResult}/>}
+          {tab === 'courses' && <CoursesTab subject={subject} session={session}/>}
+          {tab === 'exercises' && <ExercisesTab subject={subject} session={session} exercise={exercise} answer={answer} setAnswer={setAnswer} onGenerate={generateExercise} onSubmit={submitAnswer} busy={busy} lastEvaluation={lastEvaluation}/>}
+          {tab === 'evaluation' && <EvaluationTab subject={subject} evaluation={lastEvaluation} coachResult={coachResult} onAskCoach={askCoach} busy={busy} onNext={generateExercise}/>}
+          {tab === 'skills' && <SkillsTab subject={subject}/>}
+          {tab === 'history' && <HistoryTab subject={subject} session={session} history={history} analytics={analytics}/>}
+        </div>
+      );
+    }
+
+    function OverviewTab({ subject, session, analytics, onAct, onAskCoach, coachResult }) {
+      const plan = session?.plan;
+      const currentChapter = plan?.chapters?.[session?.currentChapterIndex || 0];
+      const p = subject.palette;
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="glass-themed rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="font-semibold text-base">Roadmap progress</h2>
+                <span className="text-xs text-surface-200">{analytics?.chaptersCompleted || 0} / {analytics?.totalChapters || 0} chapters</span>
+              </div>
+              <ProgressBar value={analytics?.mastery || 0} color={p.gradient}/>
+              <div className="grid grid-cols-3 gap-2 mt-4">
+                <StatCard label="Avg score" value={`${analytics?.averageScore || 0}/10`} color={p.text}/>
+                <StatCard label="Difficulty" value={`${analytics?.currentDifficulty || 1}/7`} color={p.text}/>
+                <StatCard label="Trend" value={analytics?.trend || 'stable'} color={p.text}/>
+              </div>
+            </div>
+
+            <div className="glass-themed rounded-2xl p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span style={{color: p.text}}>{UI.target}</span>
+                <h2 className="font-semibold text-base">Next activity</h2>
+              </div>
+              {currentChapter ? (
+                <>
+                  <div className="text-sm text-surface-200 mb-2">Chapter {(session?.currentChapterIndex || 0) + 1}</div>
+                  <h3 className="text-lg font-semibold mb-2">{currentChapter.title}</h3>
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    {currentChapter.objectives.map((o, i) => <span key={i} className="text-[11px] px-2 py-0.5 rounded-full bg-surface-800 text-surface-200">{o}</span>)}
+                  </div>
+                  <button onClick={onAct} className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white" style={{ background: p.gradient }}>Generate exercise {UI.arrow}</button>
+                </>
+              ) : <div className="text-surface-200 text-sm">No roadmap loaded yet.</div>}
+            </div>
+
+            {coachResult && (
+              <div className="glass-themed rounded-2xl p-5">
+                <div className="flex items-center gap-2 mb-3">
+                  <span style={{color: p.text}}>{UI.brain}</span>
+                  <h2 className="font-semibold text-base">Latest coach decision</h2>
+                  <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>{coachResult.decision.replace('_',' ')}</span>
+                </div>
+                <p className="text-sm text-surface-200 mb-3">{coachResult.reason}</p>
+                {coachResult.recommendations?.length > 0 && (
+                  <ul className="space-y-1.5">
+                    {coachResult.recommendations.map((r, i) => <li key={i} className="text-sm text-surface-200 flex gap-2"><span style={{color: p.text}} className="mt-0.5">{UI.arrow}</span>{r}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4">
+            <div className="glass-themed rounded-2xl p-5">
+              <h3 className="font-semibold mb-3">Subject info</h3>
+              <dl className="text-sm space-y-2">
+                <div className="flex justify-between"><dt className="text-surface-200">Goal</dt><dd className="text-right max-w-[60%] truncate">{subject.goal || '—'}</dd></div>
+                <div className="flex justify-between"><dt className="text-surface-200">Domain</dt><dd>{subject.domain}</dd></div>
+                <div className="flex justify-between"><dt className="text-surface-200">Theme</dt><dd className="capitalize">{subject.paletteName}</dd></div>
+                <div className="flex justify-between"><dt className="text-surface-200">Created</dt><dd>{new Date(subject.createdAt).toLocaleDateString()}</dd></div>
+              </dl>
+            </div>
+            <div className="glass-themed rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold">Top skills</h3>
+                <span className="text-xs text-surface-200">{(subject.skillGraph||[]).length} total</span>
+              </div>
+              <div className="space-y-2.5">
+                {(subject.skillGraph || []).slice(0,4).map((sk) => (
+                  <div key={sk.name}>
+                    <div className="flex items-center justify-between text-xs mb-1"><span className="text-surface-200">{sk.name}</span><span style={{color: p.text}} className="font-medium">{sk.mastery}%</span></div>
+                    <ProgressBar value={sk.mastery} color={p.gradient}/>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+            <button onClick={onAskCoach} className="w-full py-3 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2" style={{ background: p.gradient }}>
+              {UI.brain} Ask the coach
+            </button>
+          </div>
+        </div>
+      );
+    }
 
-          {history.evaluations.length > 0 && (
-            <div className="glass rounded-xl p-5 mb-8">
-              <h2 className="font-semibold mb-4">Exercise History</h2>
-              <div className="space-y-3">
-                {history.evaluations.map((ev,i) => (
-                  <div key={i} className="flex items-center gap-4 p-3 bg-surface-800/50 rounded-lg">
-                    <ScoreRing score={ev.score} size={48}/>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">Exercise #{i+1}</div>
-                      <div className="text-xs text-surface-200 truncate">{ev.strengths?.[0] || 'Completed'}</div>
+    function CoursesTab({ subject, session }) {
+      const plan = session?.plan;
+      const p = subject.palette;
+      if (!plan) return <div className="glass-themed rounded-2xl p-6 text-surface-200">Roadmap is being prepared…</div>;
+      return (
+        <div className="space-y-3">
+          {plan.chapters.map((ch, i) => {
+            const completed = session.completedChapters?.includes(i);
+            const current = i === (session.currentChapterIndex || 0);
+            return (
+              <div key={i} className={`glass-themed rounded-2xl p-5 transition-all ${current?'glow':''}`}>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm" style={{ background: completed?'rgba(34,197,94,0.15)':current?p.bg:'rgba(30,41,59,0.6)', color: completed?'#86efac':current?p.text:'#cbd5e1', border:`1px solid ${completed?'rgba(34,197,94,0.3)':current?p.border:'rgba(51,65,85,0.6)'}` }}>
+                    {completed ? UI.check : i + 1}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <h3 className="font-semibold">{ch.title}</h3>
+                      {current && <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>Current</span>}
+                      {completed && <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full bg-green-500/20 text-green-300 border border-green-500/30">Completed</span>}
                     </div>
-                    <div className="text-xs text-surface-200">{new Date(ev.createdAt).toLocaleDateString()}</div>
+                    <p className="text-sm text-surface-200 mb-2">{ch.content?.realWorldConnection}</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {ch.objectives.map((o, j) => <span key={j} className="text-[11px] px-2 py-0.5 rounded-full bg-surface-800 text-surface-200">{o}</span>)}
+                    </div>
+                    <div className="mt-2 text-[11px] text-surface-200/70">~{ch.estimatedTime} min · {ch.content?.context}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    function ExercisesTab({ subject, session, exercise, answer, setAnswer, onGenerate, onSubmit, busy, lastEvaluation }) {
+      const p = subject.palette;
+      const list = (session?.exercises || []).slice().reverse();
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            {exercise ? (
+              <div className="glass-themed rounded-2xl p-6 glow">
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <span className="px-2.5 py-1 rounded-lg text-xs font-medium" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>Chapter {exercise.chapter.index + 1}: {exercise.chapter.title}</span>
+                  <span className="px-2.5 py-1 rounded-lg text-xs bg-surface-800 text-surface-200">Difficulty: {exercise.difficultyLabel}</span>
+                  <span className="px-2.5 py-1 rounded-lg text-xs bg-purple-500/20 text-purple-300 ml-auto">{exercise.exercise.type.replace(/_/g,' ')}</span>
+                </div>
+                <div className="text-surface-200 text-sm mb-3 p-3 bg-surface-800/40 rounded-lg">{exercise.exercise.instructions}</div>
+                <div className="text-white leading-relaxed mb-5">{exercise.exercise.question}</div>
+                <textarea value={answer} onChange={(e)=>setAnswer(e.target.value)} rows={8} placeholder="Write your detailed answer here…"
+                  className="w-full px-4 py-3 bg-surface-900 border border-surface-700 rounded-xl text-white placeholder-surface-200/40 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all resize-none"/>
+                <div className="flex items-center justify-between mt-2 mb-4">
+                  <span className="text-xs text-surface-200">{answer.length} characters</span>
+                  <details className="text-xs">
+                    <summary className="cursor-pointer text-surface-200 hover:text-white">Show hint</summary>
+                    <div className="mt-2 p-3 bg-amber-500/5 border border-amber-500/10 rounded-lg text-amber-200">{exercise.exercise.hint}</div>
+                  </details>
+                </div>
+                <button onClick={onSubmit} disabled={busy || answer.trim().length < 10} className="w-full py-3 rounded-xl font-semibold text-sm text-white disabled:opacity-40 flex items-center justify-center gap-2" style={{ background: p.gradient }}>
+                  {busy ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Evaluating…</> : 'Submit answer for evaluation'}
+                </button>
+                {exercise.agentMeta && <div className="mt-3"><AgentBadge agent={exercise.agentMeta.agent} time={exercise.agentMeta.processingTime}/></div>}
+              </div>
+            ) : (
+              <div className="glass-themed rounded-2xl p-10 text-center">
+                <div className="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center mb-3" style={{ background: p.bg, color: p.text }}>{UI.pencil}</div>
+                <h2 className="font-semibold mb-1">No active exercise</h2>
+                <p className="text-sm text-surface-200 mb-5">Generate a new exercise tuned to your current chapter and difficulty.</p>
+                <button onClick={onGenerate} disabled={busy} className="px-5 py-3 rounded-xl font-semibold text-sm text-white" style={{ background: p.gradient }}>
+                  {busy ? 'Generating…' : 'Generate exercise'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div className="glass-themed rounded-2xl p-5">
+              <h3 className="font-semibold mb-3">Recent exercises</h3>
+              {list.length === 0 ? <div className="text-sm text-surface-200">Nothing yet.</div> : (
+                <div className="space-y-2">
+                  {list.slice(0,6).map((ex, i) => (
+                    <div key={i} className="p-3 rounded-xl bg-surface-800/50">
+                      <div className="text-xs text-surface-200 mb-0.5">Chapter {ex.chapterIndex + 1} · {ex.type?.replace(/_/g,' ')}</div>
+                      <div className="text-sm line-clamp-2">{ex.question}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function EvaluationTab({ subject, evaluation, coachResult, onAskCoach, busy, onNext }) {
+      const p = subject.palette;
+      if (!evaluation) return (
+        <div className="glass-themed rounded-2xl p-10 text-center text-surface-200">No evaluation yet. Submit an exercise first.</div>
+      );
+      return (
+        <div className="space-y-4">
+          <div className="glass-themed rounded-2xl p-6 glow">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-lg font-semibold">Latest evaluation</h2>
+              <ScoreRing score={evaluation.score} label="/10" color={p.primary}/>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+              <div className="p-4 rounded-xl bg-green-500/5 border border-green-500/10">
+                <h3 className="text-sm font-semibold text-green-300 mb-2">Strengths</h3>
+                <ul className="space-y-1">{evaluation.strengths.map((s,i)=><li key={i} className="text-sm text-surface-200">+ {s}</li>)}</ul>
+              </div>
+              <div className="p-4 rounded-xl bg-red-500/5 border border-red-500/10">
+                <h3 className="text-sm font-semibold text-red-300 mb-2">Weaknesses</h3>
+                <ul className="space-y-1">{evaluation.weaknesses.map((s,i)=><li key={i} className="text-sm text-surface-200">- {s}</li>)}</ul>
+              </div>
+            </div>
+            <div className="p-4 rounded-xl bg-surface-800/50">
+              <h3 className="text-sm font-semibold mb-2">Feedback</h3>
+              <p className="text-sm text-surface-200 leading-relaxed">{evaluation.feedback}</p>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button onClick={onAskCoach} disabled={busy} className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white flex items-center gap-2 disabled:opacity-40" style={{ background: p.gradient }}>
+                {UI.brain} Ask the coach
+              </button>
+              <button onClick={onNext} className="px-4 py-2.5 rounded-xl text-sm font-medium bg-surface-800 hover:bg-surface-700 text-white">Next exercise {UI.arrow}</button>
+            </div>
+          </div>
+
+          {coachResult && (
+            <div className="glass-themed rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3">
+                <span style={{color: p.text}}>{UI.brain}</span>
+                <h2 className="font-semibold">Coach decision</h2>
+                <span className="ml-auto px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>{coachResult.decision.replace('_',' ')}</span>
+              </div>
+              <p className="text-sm text-surface-200 mb-3">{coachResult.reason}</p>
+              {coachResult.report?.studentProfile && <div className="p-3 rounded-lg bg-surface-800/50 text-xs text-surface-200 mb-3"><span className="font-semibold text-white">Profile: </span>{coachResult.report.studentProfile}</div>}
+              {coachResult.recommendations?.length > 0 && (
+                <ul className="space-y-1.5">{coachResult.recommendations.map((r,i)=><li key={i} className="text-sm text-surface-200 flex gap-2"><span style={{color: p.text}}>{UI.arrow}</span>{r}</li>)}</ul>
+              )}
+              {coachResult.agentMeta && <div className="mt-3"><AgentBadge agent={coachResult.agentMeta.agent} time={coachResult.agentMeta.processingTime}/></div>}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function SkillsTab({ subject }) {
+      const p = subject.palette;
+      const skills = subject.skillGraph || [];
+      const max = skills.length;
+      // Radial layout
+      const size = 320;
+      const cx = size/2, cy = size/2;
+      const ringR = 130;
+      const points = skills.map((s, i) => {
+        const angle = (i / max) * Math.PI * 2 - Math.PI/2;
+        const r = ringR * (0.3 + (s.mastery/100) * 0.7);
+        return { x: cx + Math.cos(angle)*r, y: cy + Math.sin(angle)*r, lx: cx + Math.cos(angle)*ringR, ly: cy + Math.sin(angle)*ringR, ...s };
+      });
+      const polyPts = points.map(p => `${p.x},${p.y}`).join(' ');
+      return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 glass-themed rounded-2xl p-6 flex items-center justify-center">
+            <svg width={size} height={size}>
+              {[0.25, 0.5, 0.75, 1].map((s, i) => <circle key={i} cx={cx} cy={cy} r={ringR*s} fill="none" stroke="#1e293b" strokeWidth="1"/>)}
+              {points.map((pt, i) => <line key={i} x1={cx} y1={cy} x2={pt.lx} y2={pt.ly} stroke="#1e293b" strokeWidth="1"/>)}
+              {points.length > 0 && <polygon points={polyPts} fill={p.primary + '33'} stroke={p.primary} strokeWidth="2"/>}
+              {points.map((pt, i) => (
+                <g key={i}>
+                  <circle cx={pt.x} cy={pt.y} r="4" fill={p.primary}/>
+                  <text x={pt.lx} y={pt.ly} fill="#cbd5e1" fontSize="11" textAnchor={pt.lx > cx + 5 ? 'start' : pt.lx < cx - 5 ? 'end' : 'middle'} dominantBaseline="middle" dx={pt.lx > cx + 5 ? 6 : pt.lx < cx - 5 ? -6 : 0}>{pt.name}</text>
+                </g>
+              ))}
+            </svg>
+          </div>
+          <div className="glass-themed rounded-2xl p-5">
+            <h3 className="font-semibold mb-4">Skill graph</h3>
+            <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+              {skills.map((sk) => (
+                <div key={sk.name}>
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-medium">{sk.name}</span>
+                    <span style={{color: p.text}}>{sk.mastery}%</span>
+                  </div>
+                  <ProgressBar value={sk.mastery} color={p.gradient}/>
+                  <div className="text-[10px] text-surface-200/60 mt-0.5">{sk.exerciseCount} exercise{sk.exerciseCount!==1?'s':''} · {sk.lastAssessment ? timeAgo(sk.lastAssessment) : 'unassessed'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function HistoryTab({ subject, session, history, analytics }) {
+      const p = subject.palette;
+      if (!history || !analytics) return <div className="glass-themed rounded-2xl p-6 text-surface-200">No history yet.</div>;
+      return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <StatCard label="Mastery" value={`${analytics.mastery}%`} color={p.text}/>
+            <StatCard label="Chapters" value={`${analytics.chaptersCompleted}/${analytics.totalChapters}`} color="#86efac"/>
+            <StatCard label="Avg Score" value={`${analytics.averageScore}/10`} color="#fcd34d"/>
+            <StatCard label="Trend" value={analytics.trend} color="#a5b4fc"/>
+          </div>
+          {history.scores?.length > 0 && (
+            <div className="glass-themed rounded-2xl p-5">
+              <h3 className="font-semibold mb-4">Score progression</h3>
+              <div className="flex items-end gap-2 h-32">
+                {history.scores.map((s, i) => (
+                  <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                    <span className="text-[10px] text-surface-200">{s}</span>
+                    <div className="w-full rounded-t" style={{ height: `${(s/10)*100}%`, background: p.gradient, minHeight: '4px', opacity: 0.5 + i/history.scores.length*0.5 }}/>
+                    <span className="text-[10px] text-surface-200/60">#{i+1}</span>
                   </div>
                 ))}
               </div>
             </div>
           )}
-
-          {history.coachDecisions.length > 0 && (
-            <div className="glass rounded-xl p-5">
-              <h2 className="font-semibold mb-4">Coach Decisions</h2>
-              <div className="space-y-3">
-                {history.coachDecisions.map((cd,i) => (
-                  <div key={i} className="p-3 bg-surface-800/50 rounded-lg">
+          {history.coachDecisions?.length > 0 && (
+            <div className="glass-themed rounded-2xl p-5">
+              <h3 className="font-semibold mb-3">Coach decisions</h3>
+              <div className="space-y-2.5">
+                {history.coachDecisions.slice().reverse().map((cd, i) => (
+                  <div key={i} className="p-3 rounded-xl bg-surface-800/50">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-xs rounded-full font-medium">{cd.decision.replace('_',' ')}</span>
-                      <span className="text-xs text-surface-200">Difficulty: {cd.nextDifficulty}/7</span>
+                      <span className="px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-full" style={{ background: p.bg, color: p.text, border: `1px solid ${p.border}` }}>{cd.decision.replace(/_/g,' ')}</span>
+                      <span className="text-[11px] text-surface-200">difficulty {cd.nextDifficulty}/7</span>
+                      <span className="text-[11px] text-surface-200 ml-auto">{timeAgo(cd.createdAt)}</span>
                     </div>
                     <p className="text-sm text-surface-200">{cd.reason}</p>
                   </div>
@@ -540,112 +956,126 @@
               </div>
             </div>
           )}
-
-          {history.scores.length === 0 && (
-            <div className="glass rounded-xl p-12 text-center">
-              <div className="text-surface-200 mb-2">No exercises completed yet</div>
-              <button onClick={()=>window.dispatchEvent(new CustomEvent('navigate',{detail:'exercise'}))} className="text-brand-300 hover:text-brand-200 text-sm font-medium">Start your first exercise</button>
+          {history.evaluations?.length > 0 && (
+            <div className="glass-themed rounded-2xl p-5">
+              <h3 className="font-semibold mb-3">Evaluations</h3>
+              <div className="space-y-2.5">
+                {history.evaluations.slice().reverse().map((ev, i) => (
+                  <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-surface-800/50">
+                    <ScoreRing score={ev.score} size={48} color={p.primary}/>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium">Chapter {(ev.chapterIndex||0)+1}</div>
+                      <div className="text-xs text-surface-200 truncate">{ev.strengths?.[0] || 'Completed'}</div>
+                    </div>
+                    <div className="text-[11px] text-surface-200">{timeAgo(ev.createdAt)}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
       );
     }
+    /* END_SECTION_PAGES_2 */
 
-    // ── Sidebar ──
+    /* SECTION_APP */
+
     function Sidebar({ mobileOpen, setMobileOpen }) {
       const { state, setState } = useApp();
-      const navItems = [
-        { id:'dashboard', label:'Dashboard', icon:Icons.home },
-        { id:'program', label:'Program', icon:Icons.book, disabled:!state.plan },
-        { id:'exercise', label:'Exercise', icon:Icons.pencil, disabled:!state.plan },
-        { id:'history', label:'Analytics', icon:Icons.chart, disabled:!state.plan },
-      ];
+      const subjects = state.subjects || [];
+      const active = subjects.find((s) => s.id === state.currentSubjectId);
 
-      const nav = (id) => { setState(s=>({...s,page:id})); setMobileOpen(false); };
+      const goto = (page, extra = {}) => { setState((s) => ({ ...s, page, ...extra })); setMobileOpen(false); };
 
       return (
         <>
           {mobileOpen && <div className="fixed inset-0 bg-black/50 z-40 md:hidden" onClick={()=>setMobileOpen(false)}/>}
-          <aside className={`sidebar-mobile fixed md:static inset-y-0 left-0 z-50 w-64 bg-surface-900 border-r border-surface-700/50 flex flex-col ${mobileOpen?'mobile-menu-open':''}`}>
+          <aside className={`sidebar-mobile fixed md:static inset-y-0 left-0 z-50 w-64 bg-surface-900 border-r border-surface-700/50 flex flex-col ${mobileOpen?'mobile-menu-open':''}`} style={active ? themeStyle(active) : {}}>
             <div className="p-5 border-b border-surface-700/50">
               <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-gradient-to-br from-brand-500 to-brand-700 rounded-xl flex items-center justify-center">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: active ? active.palette.gradient : 'linear-gradient(135deg, #4f46e5, #312e81)' }}>
                   <span className="text-white font-bold text-sm">E</span>
                 </div>
                 <div>
                   <h1 className="font-bold text-lg leading-tight">Epistudy</h1>
-                  <p className="text-[10px] text-surface-200 uppercase tracking-wider">AI Learning Platform</p>
+                  <p className="text-[10px] text-surface-200 uppercase tracking-wider">Multi-Subject AI</p>
                 </div>
-                <button className="ml-auto md:hidden text-surface-200" onClick={()=>setMobileOpen(false)}>{Icons.close}</button>
+                <button className="ml-auto md:hidden text-surface-200" onClick={()=>setMobileOpen(false)}>{UI.close}</button>
               </div>
             </div>
 
-            <nav className="flex-1 p-3 space-y-1">
-              {navItems.map(item => (
-                <button key={item.id} onClick={()=>!item.disabled&&nav(item.id)} disabled={item.disabled} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${state.page===item.id?'bg-brand-500/10 text-brand-300':'text-surface-200 hover:bg-surface-800 hover:text-white'} ${item.disabled?'opacity-30 cursor-not-allowed':''}`}>
-                  {item.icon}{item.label}
-                </button>
-              ))}
+            <nav className="p-3 space-y-1">
+              <button onClick={()=>goto('hub', { currentSubjectId: null })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${state.page==='hub'?'bg-brand-500/10 text-brand-300':'text-surface-200 hover:bg-surface-800 hover:text-white'}`}>
+                {UI.grid} Subject Hub
+              </button>
             </nav>
 
-            {state.plan && (
-              <div className="p-4 border-t border-surface-700/50">
-                <div className="text-xs text-surface-200 mb-1">Current Topic</div>
-                <div className="text-sm font-medium truncate">{state.plan.topic}</div>
+            <div className="px-3 pb-2">
+              <div className="text-[10px] uppercase tracking-wider text-surface-200/60 px-2 mb-2">Subjects ({subjects.length})</div>
+              <div className="space-y-1 max-h-64 overflow-y-auto pr-1">
+                {subjects.map((s) => (
+                  <button key={s.id} onClick={()=>goto('workspace', { currentSubjectId: s.id, workspaceTab: 'overview' })} className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-all ${state.currentSubjectId===s.id?'text-white':'text-surface-200 hover:text-white hover:bg-surface-800/60'}`} style={state.currentSubjectId===s.id?{ background: s.palette.bg, border:`1px solid ${s.palette.border}` }:{}}>
+                    <div className="w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0" style={{ background: s.palette.gradient }}>
+                      <SubjectIcon name={s.icon} color="#fff" className="w-3.5 h-3.5"/>
+                    </div>
+                    <span className="truncate text-left flex-1">{s.title}</span>
+                    <span className="text-[10px] opacity-60">{s.progress ?? 0}%</span>
+                  </button>
+                ))}
+                {subjects.length === 0 && (
+                  <div className="px-2 py-3 text-xs text-surface-200/60">No subjects yet.</div>
+                )}
+              </div>
+            </div>
+
+            {active && (
+              <div className="mx-3 mb-3 p-3 rounded-xl border" style={{ background: active.palette.bg, borderColor: active.palette.border }}>
+                <div className="text-[10px] uppercase tracking-wider mb-1" style={{ color: active.palette.text }}>Active workspace</div>
+                <div className="text-sm font-semibold truncate">{active.title}</div>
                 <div className="mt-2 h-1.5 bg-surface-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-brand-500 rounded-full transition-all" style={{width:`${state.completedChapters?.length ? Math.round((state.completedChapters.length / state.plan.chapters.length) * 100) : 0}%`}}/>
+                  <div className="h-full rounded-full" style={{ width: `${active.progress || 0}%`, background: active.palette.gradient }}/>
                 </div>
               </div>
             )}
 
-            <div className="p-4 border-t border-surface-700/50">
-              <div className="text-[10px] text-surface-200/50 text-center">Powered by 4 Autonomous AI Agents</div>
+            <div className="mt-auto p-4 border-t border-surface-700/50">
+              <div className="text-[10px] text-surface-200/50 text-center">4 autonomous agents · subject-aware coach</div>
             </div>
           </aside>
         </>
       );
     }
 
-    // ── Main App ──
     function App() {
       const [state, setState] = useState({
-        page: 'dashboard',
-        sessionId: null,
-        plan: null,
-        currentChapterIndex: 0,
-        completedChapters: [],
-        lastEvaluation: null,
-        currentExercise: null,
+        page: 'hub',
+        currentSubjectId: null,
+        workspaceTab: 'overview',
+        subjects: [],
+        portfolio: null,
       });
       const [mobileOpen, setMobileOpen] = useState(false);
 
-      useEffect(() => {
-        const handler = (e) => setState(s => ({ ...s, page: e.detail }));
-        window.addEventListener('navigate', handler);
-        return () => window.removeEventListener('navigate', handler);
+      const refreshSubjects = useCallback(async () => {
+        const res = await api.listSubjects();
+        if (!res.error) setState((s) => ({ ...s, subjects: res.subjects, portfolio: res.portfolio }));
       }, []);
 
-      const renderPage = () => {
-        switch (state.page) {
-          case 'program': return <ProgramPage/>;
-          case 'exercise': return <ExercisePage/>;
-          case 'evaluation': return <EvaluationPage/>;
-          case 'history': return <HistoryPage/>;
-          default: return <DashboardPage/>;
-        }
-      };
+      useEffect(() => { refreshSubjects(); }, [refreshSubjects]);
+
+      const ctx = useMemo(() => ({ state, setState, refreshSubjects }), [state, refreshSubjects]);
 
       return (
-        <AppContext.Provider value={{ state, setState }}>
+        <AppContext.Provider value={ctx}>
           <div className="flex h-screen overflow-hidden">
             <Sidebar mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}/>
-            <main className="flex-1 overflow-y-auto">
+            <main className="flex-1 overflow-y-auto grid-bg">
               <header className="sticky top-0 z-30 glass px-4 py-3 flex items-center gap-3 md:hidden">
-                <button onClick={()=>setMobileOpen(true)} className="text-surface-200">{Icons.menu}</button>
+                <button onClick={()=>setMobileOpen(true)} className="text-surface-200">{UI.menu}</button>
                 <span className="font-semibold">Epistudy</span>
               </header>
               <div className="p-4 md:p-8">
-                {renderPage()}
+                {state.page === 'workspace' && state.currentSubjectId ? <SubjectWorkspace/> : <SubjectHub/>}
               </div>
             </main>
           </div>
@@ -654,6 +1084,8 @@
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+    /* END_SECTION_APP */
   </script>
 </body>
 </html>
+

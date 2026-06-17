@@ -7,13 +7,14 @@ const port = process.env.PORT || 3000;
 
 // In-memory fallback for when Redis is unavailable
 class MemoryStore {
-  constructor() { this.store = new Map(); this.timers = new Map(); }
+  constructor() { this.store = new Map(); this.timers = new Map(); this.MAX_TIMEOUT = 2147483647; }
   async connect() { console.log('Using in-memory store (Redis unavailable)'); }
   async get(key) { return this.store.get(key) || null; }
   async setEx(key, ttl, value) {
     this.store.set(key, value);
     if (this.timers.has(key)) clearTimeout(this.timers.get(key));
-    this.timers.set(key, setTimeout(() => { this.store.delete(key); this.timers.delete(key); }, ttl * 1000));
+    const ms = Math.min(ttl * 1000, this.MAX_TIMEOUT); // cap to setTimeout max
+    this.timers.set(key, setTimeout(() => { this.store.delete(key); this.timers.delete(key); }, ms));
   }
 }
 
@@ -42,6 +43,7 @@ app.use('/api/exercise', require('./routes/exercise'));
 app.use('/api/evaluate', require('./routes/evaluate'));
 app.use('/api/coach', require('./routes/coach'));
 app.use('/api/session', require('./routes/session'));
+app.use('/api/subjects', require('./routes/subjects'));
 
 // SPA fallback
 app.get('*', (req, res) => {
